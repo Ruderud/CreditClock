@@ -44,10 +44,10 @@ final class ServiceStore: ObservableObject {
         let previousByServiceId = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
 
         guard !providers.isEmpty else {
-            if snapshots.isEmpty {
-                snapshotStore.save([])
-                WidgetCenter.shared.reloadAllTimelines()
-            }
+            // Keep and re-publish the last cached snapshots so widgets can sync even when
+            // local folder access is not configured yet.
+            snapshotStore.save(snapshots)
+            WidgetCenter.shared.reloadAllTimelines()
             return
         }
 

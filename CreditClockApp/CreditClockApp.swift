@@ -1,4 +1,5 @@
 import SwiftUI
+import WidgetKit
 
 @main
 struct CreditClockApp: App {
@@ -12,6 +13,15 @@ struct CreditClockApp: App {
                 .task {
                     await store.refresh()
                     startPollingIfNeeded()
+                }
+                .onChange(of: store.hasConfiguredProviders) { _, hasProviders in
+                    if hasProviders {
+                        startPollingIfNeeded()
+                    } else if scheduler != nil {
+                        scheduler?.stop()
+                        scheduler = nil
+                        WidgetCenter.shared.reloadAllTimelines()
+                    }
                 }
         }
 
