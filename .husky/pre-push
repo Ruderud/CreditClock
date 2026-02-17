@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  exit 0
+fi
+
+if [ "${CREDITCLOCK_SKIP_RELEASE_UPLOAD:-0}" = "1" ]; then
+  echo "[release] Skipping main release upload (CREDITCLOCK_SKIP_RELEASE_UPLOAD=1)."
+  exit 0
+fi
+
+"$ROOT_DIR/scripts/upload-main-release.sh"
