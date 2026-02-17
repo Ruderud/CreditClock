@@ -16,9 +16,10 @@ struct SnapshotStore {
         }
 
         // UserDefaults (fallback)
-        let defaults = AppGroup.defaults
-        defaults.set(data, forKey: AppGroup.snapshotKey)
-        defaults.synchronize()
+        if let defaults = AppGroup.defaults {
+            defaults.set(data, forKey: AppGroup.snapshotKey)
+            defaults.synchronize()
+        }
     }
 
     func load() -> [ServiceSnapshot] {
@@ -34,15 +35,22 @@ struct SnapshotStore {
         }
 
         // UserDefaults (fallback)
-        guard let data = AppGroup.defaults.data(forKey: AppGroup.snapshotKey) else { return [] }
+        guard let data = AppGroup.defaults?.data(forKey: AppGroup.snapshotKey) else { return [] }
         return (try? decoder.decode([ServiceSnapshot].self, from: data)) ?? []
     }
 
     private func containerFileURL() -> URL? {
-        guard let container = FileManager.default.containerURL(
+        if let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: groupId
-        ) else { return nil }
-        try? FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
-        return container.appendingPathComponent(fileName)
+        ) {
+            try? FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+            return container.appendingPathComponent(fileName)
+        }
+
+        // Fallback path for some local debug signing setups where containerURL can fail.
+        let fallback = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library/Group Containers/\(groupId)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: fallback, withIntermediateDirectories: true)
+        return fallback.appendingPathComponent(fileName)
     }
 }
