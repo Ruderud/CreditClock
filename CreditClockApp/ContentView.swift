@@ -88,9 +88,9 @@ private struct ServiceRow: View {
     let snapshot: ServiceSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(snapshot.name)
+                Text(snapshot.displayName)
                     .font(.headline)
                 Spacer()
                 Text(snapshot.subscriptionState.title)
@@ -101,17 +101,17 @@ private struct ServiceRow: View {
                     .foregroundStyle(statusColor)
             }
 
-            ProgressView(value: snapshot.utilization)
-                .tint(progressColor)
+            QuotaProgressLine(
+                title: "5-hour refill",
+                remainingFraction: snapshot.fiveHourRemaining,
+                refillAt: snapshot.fiveHourRefillDate
+            )
 
-            HStack(spacing: 16) {
-                Label("\(snapshot.usageUsed)/\(snapshot.usageLimit)", systemImage: "speedometer")
-                Label("Refill \(snapshot.refillDescription)", systemImage: "clock")
-                Spacer()
-                Label("Left \(snapshot.remaining)", systemImage: "bolt.fill")
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            QuotaProgressLine(
+                title: "Weekly refill",
+                remainingFraction: snapshot.weeklyRemaining,
+                refillAt: snapshot.weeklyRefillDate
+            )
         }
         .padding(12)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -125,11 +125,49 @@ private struct ServiceRow: View {
         case .paused: return .yellow
         }
     }
+}
 
-    private var progressColor: Color {
-        if snapshot.utilization > 0.9 { return .red }
-        if snapshot.utilization > 0.7 { return .orange }
+private struct QuotaProgressLine: View {
+    let title: String
+    let remainingFraction: Double
+    let refillAt: Date
+
+    private var clampedRemaining: Double {
+        min(max(remainingFraction, 0), 1)
+    }
+
+    private var remainingPercentText: String {
+        "\(Int((clampedRemaining * 100).rounded()))%"
+    }
+
+    private var tintColor: Color {
+        if clampedRemaining <= 0.10 { return .red }
+        if clampedRemaining <= 0.30 { return .orange }
         return .green
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("\(title) · \(relativeFormatter.localizedString(for: refillAt, relativeTo: Date()))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Text(remainingPercentText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(tintColor)
+            }
+
+            ProgressView(value: clampedRemaining)
+                .tint(tintColor)
+        }
+    }
+
+    private var relativeFormatter: RelativeDateTimeFormatter {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
     }
 }
 

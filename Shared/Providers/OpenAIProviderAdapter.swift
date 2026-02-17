@@ -51,6 +51,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
         } else {
             fiveHourReset = Date().addingTimeInterval(3600)
         }
+        let weeklyReset = iso.date(from: usage.weeklyResetsAt) ?? Date().addingTimeInterval(7 * 24 * 3600)
 
         return ServiceSnapshot(
             id: serviceId,
@@ -59,7 +60,11 @@ struct OpenAIProviderAdapter: ServiceProvider {
             usageLimit: 100,
             refillAt: fiveHourReset,
             subscriptionState: primaryPercent >= 90 ? .paused : .active,
-            updatedAt: Date()
+            updatedAt: Date(),
+            fiveHourUtilization: Double(fiveH) / 100,
+            weeklyUtilization: Double(weekly) / 100,
+            fiveHourRefillAt: fiveHourReset,
+            weeklyRefillAt: weeklyReset
         )
     }
 
@@ -141,6 +146,9 @@ struct OpenAIProviderAdapter: ServiceProvider {
             let weekly = Int(secondaryPct)
             let primaryPercent = max(fiveH, weekly)
             let fiveHourReset = Date(timeIntervalSince1970: primaryResets)
+            let weeklyReset = secondaryResets > 0
+                ? Date(timeIntervalSince1970: secondaryResets)
+                : Date().addingTimeInterval(7 * 24 * 3600)
 
             return ServiceSnapshot(
                 id: serviceId,
@@ -149,7 +157,11 @@ struct OpenAIProviderAdapter: ServiceProvider {
                 usageLimit: 100,
                 refillAt: fiveHourReset,
                 subscriptionState: primaryPercent >= 90 ? .paused : .active,
-                updatedAt: Date()
+                updatedAt: Date(),
+                fiveHourUtilization: Double(fiveH) / 100,
+                weeklyUtilization: Double(weekly) / 100,
+                fiveHourRefillAt: fiveHourReset,
+                weeklyRefillAt: weeklyReset
             )
         }
     }
@@ -214,7 +226,11 @@ struct OpenAIProviderAdapter: ServiceProvider {
             usageLimit: 100,
             refillAt: activeUntil,
             subscriptionState: now > activeUntil ? .expired : .active,
-            updatedAt: now
+            updatedAt: now,
+            fiveHourUtilization: nil,
+            weeklyUtilization: nil,
+            fiveHourRefillAt: nil,
+            weeklyRefillAt: nil
         )
     }
 

@@ -61,6 +61,12 @@ struct AnthropicProviderAdapter: ServiceProvider {
         } else {
             fiveHourReset = Date().addingTimeInterval(3600)
         }
+        let weeklyReset: Date
+        if let resetStr = usage.weeklyResetsAt, let d = iso.date(from: resetStr) {
+            weeklyReset = d
+        } else {
+            weeklyReset = Date().addingTimeInterval(7 * 24 * 3600)
+        }
 
         // Use the higher utilization as primary display
         let primaryPercent = max(fiveHour, weekly)
@@ -72,7 +78,11 @@ struct AnthropicProviderAdapter: ServiceProvider {
             usageLimit: 100,
             refillAt: fiveHourReset,
             subscriptionState: primaryPercent >= 90 ? .paused : .active,
-            updatedAt: Date()
+            updatedAt: Date(),
+            fiveHourUtilization: Double(fiveHour) / 100,
+            weeklyUtilization: Double(weekly) / 100,
+            fiveHourRefillAt: fiveHourReset,
+            weeklyRefillAt: weeklyReset
         )
     }
 
@@ -105,6 +115,12 @@ struct AnthropicProviderAdapter: ServiceProvider {
         } else {
             resetDate = Date().addingTimeInterval(3600)
         }
+        let weeklyReset: Date
+        if let resetStr = decoded.sevenDay?.resetsAt, let d = iso.date(from: resetStr) {
+            weeklyReset = d
+        } else {
+            weeklyReset = Date().addingTimeInterval(7 * 24 * 3600)
+        }
 
         let primaryPercent = max(fiveHour, weekly)
 
@@ -115,7 +131,11 @@ struct AnthropicProviderAdapter: ServiceProvider {
             usageLimit: 100,
             refillAt: resetDate,
             subscriptionState: primaryPercent >= 90 ? .paused : .active,
-            updatedAt: Date()
+            updatedAt: Date(),
+            fiveHourUtilization: Double(fiveHour) / 100,
+            weeklyUtilization: Double(weekly) / 100,
+            fiveHourRefillAt: resetDate,
+            weeklyRefillAt: weeklyReset
         )
     }
 

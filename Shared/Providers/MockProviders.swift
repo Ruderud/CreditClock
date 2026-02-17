@@ -20,7 +20,11 @@ struct MockServiceProvider: ServiceProvider {
             usageLimit: limit,
             refillAt: refillAt,
             subscriptionState: state,
-            updatedAt: Date()
+            updatedAt: Date(),
+            fiveHourUtilization: nil,
+            weeklyUtilization: nil,
+            fiveHourRefillAt: nil,
+            weeklyRefillAt: nil
         )
     }
 }

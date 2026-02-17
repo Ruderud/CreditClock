@@ -46,7 +46,11 @@ struct GeminiProviderAdapter: ServiceProvider {
             usageLimit: modelCount > 0 ? 30 : 0,
             refillAt: refillAt,
             subscriptionState: modelCount > 0 ? .active : .expired,
-            updatedAt: now
+            updatedAt: now,
+            fiveHourUtilization: nil,
+            weeklyUtilization: nil,
+            fiveHourRefillAt: nil,
+            weeklyRefillAt: nil
         )
     }
 }
