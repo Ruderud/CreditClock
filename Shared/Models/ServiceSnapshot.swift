@@ -38,6 +38,14 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
         ServiceSnapshot.relativeFormatter.localizedString(for: refillAt, relativeTo: Date())
     }
 
+    /// Progress for circular countdown ring (0 = just started, 1 = refill imminent)
+    var refillRingProgress: Double {
+        let total = refillAt.timeIntervalSince(updatedAt)
+        guard total > 0 else { return 1 }
+        let elapsed = Date().timeIntervalSince(updatedAt)
+        return min(max(elapsed / total, 0), 1)
+    }
+
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
