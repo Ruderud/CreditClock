@@ -15,12 +15,16 @@ struct CreditClockTimelineProvider: TimelineProvider {
 
     func getSnapshot(in context: Context, completion: @escaping (CreditClockEntry) -> Void) {
         let snapshots = store.load()
-        completion(CreditClockEntry(date: Date(), snapshots: snapshots.isEmpty ? ServiceSnapshot.samples : snapshots))
+        if context.isPreview {
+            completion(CreditClockEntry(date: Date(), snapshots: ServiceSnapshot.samples))
+            return
+        }
+        completion(CreditClockEntry(date: Date(), snapshots: snapshots))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<CreditClockEntry>) -> Void) {
         let snapshots = store.load()
-        let entry = CreditClockEntry(date: Date(), snapshots: snapshots.isEmpty ? ServiceSnapshot.samples : snapshots)
+        let entry = CreditClockEntry(date: Date(), snapshots: snapshots)
         let nextUpdate = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
         completion(Timeline(entries: [entry], policy: .after(nextUpdate)))
     }
@@ -47,32 +51,43 @@ struct CreditClockWidgetView: View {
             Text("AI Credits")
                 .font(.headline)
 
-            ForEach(entry.snapshots.prefix(4)) { snapshot in
-                HStack(spacing: 8) {
-                    CircularCountdownRing(progress: snapshot.refillRingProgress, color: statusColor(for: snapshot.subscriptionState))
-                        .frame(width: 20, height: 20)
-
-                    Text(snapshot.name)
+            if entry.snapshots.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No synced data")
                         .font(.caption)
-                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                    Text("Open CreditClock and refresh once.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            } else {
+                ForEach(entry.snapshots.prefix(4)) { snapshot in
+                    HStack(spacing: 8) {
+                        CircularCountdownRing(progress: snapshot.refillRingProgress, color: statusColor(for: snapshot.subscriptionState))
+                            .frame(width: 20, height: 20)
 
-                    Spacer()
+                        Text(snapshot.name)
+                            .font(.caption)
+                            .lineLimit(1)
 
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Color.secondary.opacity(0.2))
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(progressColor(for: snapshot.utilization))
-                                .frame(width: geo.size.width * snapshot.utilization)
+                        Spacer()
+
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(Color.secondary.opacity(0.2))
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(progressColor(for: snapshot.utilization))
+                                    .frame(width: geo.size.width * snapshot.utilization)
+                            }
                         }
-                    }
-                    .frame(width: 40, height: 6)
+                        .frame(width: 40, height: 6)
 
-                    Text("\(snapshot.remaining)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.primary)
-                        .frame(width: 28, alignment: .trailing)
+                        Text("\(snapshot.remaining)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.primary)
+                            .frame(width: 28, alignment: .trailing)
+                    }
                 }
             }
 
