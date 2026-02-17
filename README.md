@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-macOS%2011%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="macOS 11+" />
+  <img src="https://img.shields.io/badge/Platform-macOS%2014%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="macOS 14+" />
   <img src="https://img.shields.io/badge/Swift-5.10-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift 5.10" />
   <img src="https://img.shields.io/badge/UI-SwiftUI%20%2B%20WidgetKit-0A84FF?style=flat-square" alt="SwiftUI + WidgetKit" />
   <img src="https://img.shields.io/badge/Status-MVP-5E5CE6?style=flat-square" alt="MVP" />
@@ -117,11 +117,11 @@ let provider = JSONEndpointProvider(serviceId: "example", request: request) { da
 
 ## Roadmap
 
-- [ ] Add first-party providers for OpenAI / Anthropic / Gemini
+- [x] Add first-party providers for OpenAI / Anthropic / Gemini
 - [ ] Add per-service refill policy modeling (fixed reset, billing cycle, rolling window)
-- [ ] Add retry/backoff and stale-cache policy for failures
-- [ ] Add settings UI for account tokens and provider enable/disable
-- [ ] Evaluate menu bar mode in addition to widget
+- [x] Add retry/backoff and stale-cache policy for failures
+- [x] Add settings UI for account tokens and provider enable/disable
+- [x] Menu bar mode (MenuBarExtra)
 
 ## Open Source
 

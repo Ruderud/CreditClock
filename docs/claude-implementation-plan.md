@@ -1,108 +1,173 @@
-# CreditClock Implementation Plan for Claude (Based on Stitch Design)
+# CreditClock Claude Implementation Plan (Auth + Polling + Widget + Menu Bar)
 
-## Goal
-Implement the macOS-first CreditClock UI and data flow from Stitch mockups, with WidgetKit parity for glanceable usage status.
+## 0) 목표
+CreditClock를 macOS 전용 유틸리티로 확장한다.
+핵심 요구사항은 아래 4가지다.
 
-## Scope
-- In scope: macOS app UI, widget UI, provider abstraction, persistence, refresh pipeline, status system
-- Out of scope (first phase): account billing management, cross-device sync, full analytics backend
+1. AI 서비스별 인증을 지원한다. OAuth 가능 서비스는 OAuth 우선, 불가 시 API Key 입력.
+2. 사용량/리필 정보를 주기적으로 polling해서 앱/위젯에 반영한다.
+3. 위젯에서 서비스별 `현재 사용량(선형 progress)` + `리필까지 남은 시간(원형 loader)`를 표시한다.
+4. macOS 상단 메뉴바(Menu Bar)에서 클릭해 현재 상태를 확인할 수 있게 한다.
 
-## Milestones
+## 1) 인증 전략 (서비스별 정책)
+기준일: 2026-02-17
 
-### M1. Design Token Foundation
-Deliverables:
-- Create centralized visual tokens for colors, spacing, radius, typography scale
-- Mirror Stitch palette and semantic states (`active/trial/paused/expired/warning`)
-- Add utility styles for card, status pill, progress, metric emphasis
+| 서비스 | 1차 인증 방식 | OAuth 지원 여부 | 비고 |
+|---|---|---|---|
+| OpenAI API | API Key / Admin Key | 직접 API OAuth 문서 없음 | Usage/Costs 조회는 조직 권한 키(예: admin key) 필요 |
+| Anthropic API | API Key / Admin API Key | 직접 API OAuth 문서 없음 | Usage & Cost Admin API는 Admin key 필요 |
+| Gemini API (AI Studio) | API Key | 지원(선택) | 기본은 API key, 필요 시 OAuth quickstart 가능 |
 
-Acceptance:
-- All app screens consume shared tokens; no hard-coded random colors
+구현 원칙:
+- `OAuth available -> OAuth 기본 선택`, 단 OpenAI/Anthropic은 현재 직접 API 기준 API Key 방식으로 시작.
+- Gemini는 `API Key`와 `OAuth`를 모두 옵션으로 제공.
+- 인증 정보 저장은 Keychain 사용(토큰/키 모두 평문 저장 금지).
 
-### M2. Dashboard Layout (macOS)
-Deliverables:
-- Header toolbar (app name, sync info, Refresh, Add Provider)
-- Sidebar filters (All/Active/Trial/Expired/Paused)
-- Summary strip (total remaining, next refill, warning count)
-- Responsive card grid for provider snapshots
+## 2) 데이터 모델 확장
+기존 `ServiceSnapshot` 중심 구조를 아래로 확장한다.
 
-Acceptance:
-- Layout visually matches Stitch structure at common desktop widths
-- Keyboard navigation works between sidebar and cards
+### 2.1 ProviderAccount
+- `id`, `provider` (`openai`, `anthropic`, `gemini`)
+- `authMethod` (`oauth`, `apiKey`)
+- `credentialsRef` (Keychain 참조 키)
+- `isEnabled`
+- `pollIntervalSeconds`
 
-### M3. Provider Card & Status Logic
-Deliverables:
-- Provider card component with usage bar, remaining credits, refill countdown, status pill
-- Status thresholds:
-  - `warning` when utilization >= 0.80
-  - `critical` when utilization >= 0.95
-- Relative time formatting and last-sync display
+### 2.2 UsageWindow
+- `windowStart`, `windowEnd`
+- `used`, `limit`
+- `refillAt`
+- `remaining = max(limit - used, 0)`
+- `timeRemaining = max(refillAt - now, 0)`
 
-Acceptance:
-- Cards render accurate states from mock and real data
-- Warning/critical styling consistent in app + widget
+### 2.3 FetchHealth
+- `lastSuccessAt`, `lastFailureAt`, `lastErrorMessage`
+- `consecutiveFailures`
+- `latencyMs`
 
-### M4. Provider Detail Screen
-Deliverables:
-- Detail route/view with cycle stats, trend chart placeholder, diagnostics panel
-- Segmented range selector (7d/30d)
-- Alert rule controls + test connection action
+## 3) 아키텍처 변경
 
-Acceptance:
-- Detail view opens from dashboard card
-- Data placeholders are wired to model contracts
+### 3.1 Auth Layer
+- `AuthMethod` enum: `.oauth`, `.apiKey`
+- `CredentialStore` 프로토콜 + `KeychainCredentialStore` 구현
+- `OAuthCoordinator`:
+  - macOS `ASWebAuthenticationSession` 기반
+  - PKCE + refresh token 보관
+  - 우선 적용 대상: Gemini
 
-### M5. Widget Parity
-Deliverables:
-- Medium and large widget variants matching Stitch board
-- Shared store synchronization via App Group
-- Timeline refresh policy and fallback snapshot handling
+### 3.2 Provider Layer
+- `ServiceProvider`를 `UsageProvider`/`AuthProvider` 역할로 분리
+- Provider별 Adapter:
+  - `OpenAIProviderAdapter`
+  - `AnthropicProviderAdapter`
+  - `GeminiProviderAdapter`
+- 각 Adapter는 공통 출력 `ServiceSnapshot`으로 매핑
 
-Acceptance:
-- Widget values align with in-app snapshot data
-- Visual parity with design for typography/status chips
+### 3.3 Polling Layer
+- `PollingScheduler` 신설:
+  - 기본 5분 주기
+  - 실패 시 exponential backoff (예: 1m → 2m → 4m, max 30m)
+  - 성공 시 기본 주기로 복귀
+- 앱 활성/비활성 상태에 따라 polling 강도 조절
+- polling 결과 저장 후 `WidgetCenter.reloadAllTimelines()` 호출
 
-### M6. Data Integration Layer
-Deliverables:
-- Replace mock providers with concrete providers incrementally
-- Introduce normalized mapping to `ServiceSnapshot`
-- Retry/backoff, stale cache fallback, error telemetry hooks
+## 4) UI 구현 계획 (macOS 앱)
 
-Acceptance:
-- At least one live provider integrated end-to-end
-- API failure does not break UI rendering
+### 4.1 계정/인증 설정 화면
+- `Provider Settings` 화면 추가
+- 서비스 카드별:
+  - 인증 방식 선택 (가능한 방식만 표시)
+  - API Key 입력 or OAuth 연결 버튼
+  - 연결 테스트 버튼
+  - polling interval 설정
 
-## Claude Task Breakdown (Suggested Sequence)
-1. Build `DesignTokens.swift` + semantic color/state map.
-2. Refactor current `ContentView` into feature-based views:
-   - `DashboardView`
-   - `SidebarFilterView`
-   - `SummaryStripView`
-   - `ProviderCardView`
-3. Implement stateful filtering and sorting in `ServiceStore`.
-4. Add provider detail navigation + placeholder chart module.
-5. Align widget UI components with shared status style helpers.
-6. Integrate first real provider behind `ServiceProvider` protocol.
-7. Add snapshot/UI tests for core states.
+### 4.2 대시보드
+- 기존 리스트를 확장해 아래 표시:
+  - 사용량 progress
+  - 남은 크레딧
+  - 리필까지 남은 시간
+  - 마지막 동기화 시각
+  - 오류 상태 배지
 
-## Engineering Constraints
-- Keep SwiftUI views small and composable.
-- Preserve `Shared/` model contracts for app/widget compatibility.
-- Never hard-code API tokens in source; use Keychain.
-- Maintain minimum deployment target currently set in project config.
+## 5) Widget 구현 계획
 
-## Test Plan
-- Unit tests:
-  - Utilization and threshold calculation
-  - Refill countdown formatting
-  - Store filtering/sorting behavior
-- Snapshot/UI tests:
-  - Dashboard default/empty/error/warning states
-  - Widget medium/large visual state checks
-- Integration tests:
-  - Provider mapping from raw JSON to `ServiceSnapshot`
+### 5.1 표시 요구사항
+각 서비스 row에 다음 2개를 함께 표시:
 
-## Definition of Done
-- macOS dashboard matches Stitch key structure and hierarchy.
-- Widget reflects the same source-of-truth data.
-- One live provider integrated with resilient failure handling.
-- Tests for status logic and store behavior are green.
+1. `LinearProgressView`: 사용량(used/limit)
+2. `CircularCountdownRing`: 리필까지 남은 시간 비율
+
+### 5.2 원형 loader 계산
+- `ringProgress = elapsedSinceWindowStart / totalWindowDuration`
+- 또는 `remainingRatio = timeRemaining / totalWindowDuration`
+- 데이터가 불완전하면 fallback으로 텍스트만 표시
+
+### 5.3 Widget family
+- `systemMedium`: 상위 3~4개 서비스
+- `systemLarge`: 더 많은 서비스 + 상태 텍스트 보강
+
+## 6) Menu Bar (Top Nav) 구현 계획
+
+### 6.1 Scene 추가
+- `CreditClockApp`에 `MenuBarExtra` 추가
+- 메뉴바 아이콘 클릭 시:
+  - 서비스 요약 리스트
+  - 즉시 새로고침 버튼
+  - 메인 앱 열기 버튼
+
+### 6.2 메뉴바 콘텐츠
+- 서비스명
+- 남은량
+- 리필 카운트다운
+- 상태 점(색상)
+
+## 7) Claude 작업 순서 (실행 단위)
+
+### Phase 1: Foundation
+1. 모델 확장(`ProviderAccount`, `FetchHealth`, `UsageWindow`)
+2. Keychain 저장소 + CredentialStore 구현
+3. PollingScheduler 도입
+
+### Phase 2: Auth UI + Provider Config
+1. Provider Settings 화면 추가
+2. API Key 입력 플로우 연결
+3. Gemini OAuth 플로우(1차) 연결
+
+### Phase 3: Provider Integration
+1. OpenAI usage/cost adapter
+2. Anthropic usage/cost adapter
+3. Gemini adapter(API key 우선, OAuth 병행)
+
+### Phase 4: Widget + Menu Bar
+1. 위젯 row에 progress + circular ring 도입
+2. MenuBarExtra scene 추가
+3. 앱/위젯/메뉴바 동기화 확인
+
+### Phase 5: Hardening
+1. 재시도/백오프/오류 배지 강화
+2. 테스트 추가(모델 매핑/시간 계산/필터링)
+3. 민감정보/로그 마스킹 점검
+
+## 8) 수용 기준 (Acceptance Criteria)
+- 사용자는 서비스별로 인증 방식을 설정할 수 있다.
+- polling 주기마다 데이터가 갱신되고, 실패 시 백오프가 동작한다.
+- 위젯에 서비스별 사용량 progress + 리필 원형 loader가 보인다.
+- 메뉴바 클릭으로 핵심 상태를 즉시 확인할 수 있다.
+- API 키/토큰은 Keychain에 저장된다.
+
+## 9) 리스크 / 결정 필요사항
+- OpenAI/Anthropic은 직접 API OAuth 흐름이 아닌 API Key 중심으로 시작한다.
+- 서비스별 "limit/refill" 정의가 다르므로 공통 정규화 규칙이 필요하다.
+- 초기에는 3개 서비스(OpenAI, Anthropic, Gemini) 우선 구현 후 확장한다.
+
+## 10) 참고 문서 (공식)
+- OpenAI Quickstart (API key): https://platform.openai.com/docs/quickstart/overview
+- OpenAI Usage/Costs API: https://platform.openai.com/docs/api-reference/usage/costs
+- Anthropic API Overview (x-api-key): https://docs.anthropic.com/en/api/getting-started
+- Anthropic Usage & Cost Admin API: https://docs.anthropic.com/en/api/usage-cost-api
+- Gemini API Quickstart (API key): https://ai.google.dev/gemini-api/docs/quickstart
+- Gemini API Reference (x-goog-api-key): https://ai.google.dev/api
+- Gemini OAuth Quickstart: https://ai.google.dev/gemini-api/docs/oauth
+
+## 11) 관련 개발 플랜 문서
+- Codex 사용량(5h/1week) 위젯 연동 플랜: `docs/codex-usage-widget-plan.md`
