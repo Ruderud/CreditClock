@@ -1,0 +1,53 @@
+name: CreditClock
+options:
+  minimumXcodeGenVersion: 2.39.0
+  deploymentTarget:
+    macOS: "14.0"
+configs:
+  Debug: debug
+  Release: release
+targets:
+  CreditClock:
+    type: application
+    platform: macOS
+    sources:
+      - path: CreditClockApp
+      - path: Shared
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.creditclock.app
+      PRODUCT_NAME: CreditClock
+      SWIFT_VERSION: 5.10
+      INFOPLIST_KEY_CFBundleDisplayName: CreditClock
+      INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+      CODE_SIGN_STYLE: Automatic
+    entitlements:
+      path: CreditClockApp/CreditClock.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.application-groups:
+          - group.com.creditclock.shared
+    dependencies:
+      - target: CreditClockWidgetExtension
+
+  CreditClockWidgetExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: CreditClockWidget
+      - path: Shared
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.creditclock.app.widget
+      PRODUCT_NAME: CreditClockWidget
+      SWIFT_VERSION: 5.10
+      CODE_SIGN_STYLE: Automatic
+      APPLICATION_EXTENSION_API_ONLY: true
+      INFOPLIST_KEY_CFBundleDisplayName: CreditClock Widget
+      INFOPLIST_KEY_NSExtensionPointIdentifier: com.apple.widgetkit-extension
+      INFOPLIST_KEY_NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).CreditClockWidgetBundle
+    entitlements:
+      path: CreditClockWidget/CreditClockWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups:
+          - group.com.creditclock.shared
