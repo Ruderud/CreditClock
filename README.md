@@ -80,6 +80,20 @@ open CreditClock.xcodeproj
 
 Then run the `CreditClock` scheme.
 
+## Commit Automation (Husky-Style)
+
+CreditClock uses a Git `pre-commit` hook (via `.husky/`) to enforce baseline quality and version metadata:
+
+- Runs Swift type-checks for shared/app/widget sources.
+- Auto-bumps patch version in `VERSION` on each commit.
+- Regenerates and stages `/Shared/Generated/BuildVersion.generated.swift`.
+
+If hooks are not active in your local clone, run:
+
+```bash
+git config core.hooksPath .husky
+```
+
 ## Real API Integration
 
 Current providers are mock-based for MVP development.

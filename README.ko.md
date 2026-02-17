@@ -80,6 +80,20 @@ open CreditClock.xcodeproj
 
 그 다음 `CreditClock` 스킴을 실행하세요.
 
+## 커밋 자동화 (Husky 스타일)
+
+CreditClock는 `.husky/` 기반 `pre-commit` 훅으로 기본 품질/버전 메타데이터를 자동 처리합니다.
+
+- Shared/App/Widget Swift 소스 타입체크 실행
+- 커밋마다 `VERSION` 패치 버전 자동 증가
+- `/Shared/Generated/BuildVersion.generated.swift` 재생성 및 자동 스테이징
+
+로컬 클론에서 훅이 비활성화되어 있다면 아래를 실행하세요.
+
+```bash
+git config core.hooksPath .husky
+```
+
 ## 실제 API 연동
 
 현재는 MVP 개발을 위해 Mock Provider를 사용합니다.

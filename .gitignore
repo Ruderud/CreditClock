@@ -4,3 +4,5 @@ DerivedData
 *.xcodeproj/xcuserdata
 *.xcworkspace/xcuserdata
 *.swp
+.claude/
+.omc/
