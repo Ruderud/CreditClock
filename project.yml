@@ -82,4 +82,7 @@ targets:
         com.apple.security.application-groups:
           - group.com.creditclock.shared
         com.apple.security.temporary-exception.files.home-relative-path.read-only:
+          - .claude/
+          - .codex/
           - .creditclock/
+          - Library/Group Containers/group.com.creditclock.shared/

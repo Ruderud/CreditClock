@@ -42,16 +42,13 @@ struct OpenAIProviderAdapter: ServiceProvider {
         let weekly = usage.weeklyPercent
         let primaryPercent = max(fiveH, weekly)
 
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
         let fiveHourReset: Date
-        if let d = iso.date(from: usage.fiveHourResetsAt) {
+        if let d = parseISO8601Date(usage.fiveHourResetsAt) {
             fiveHourReset = d
         } else {
             fiveHourReset = Date().addingTimeInterval(3600)
         }
-        let weeklyReset = iso.date(from: usage.weeklyResetsAt) ?? Date().addingTimeInterval(7 * 24 * 3600)
+        let weeklyReset = parseISO8601Date(usage.weeklyResetsAt) ?? Date().addingTimeInterval(7 * 24 * 3600)
 
         return ServiceSnapshot(
             id: serviceId,
@@ -250,6 +247,26 @@ struct OpenAIProviderAdapter: ServiceProvider {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return json
     }
+
+    private func parseISO8601Date(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        if let parsed = Self.iso8601WithFractional.date(from: value) {
+            return parsed
+        }
+        return Self.iso8601Standard.date(from: value)
+    }
+
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let iso8601Standard: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 }
 
 // MARK: - Models

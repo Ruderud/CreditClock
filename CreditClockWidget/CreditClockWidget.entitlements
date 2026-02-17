@@ -10,7 +10,10 @@
     </array>
     <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
     <array>
+        <string>.claude/</string>
+        <string>.codex/</string>
         <string>.creditclock/</string>
+        <string>Library/Group Containers/group.com.creditclock.shared/</string>
     </array>
 </dict>
 </plist>

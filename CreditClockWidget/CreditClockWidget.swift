@@ -23,6 +23,7 @@ struct CreditClockTimelineProvider: TimelineProvider {
 
     func getSnapshot(in context: Context, completion: @escaping (CreditClockEntry) -> Void) {
         let result = store.loadWithDiagnostics()
+        let patched = WidgetLocalUsageOverlay.patch(result.snapshots)
         if context.isPreview {
             completion(CreditClockEntry(
                 date: Date(),
@@ -34,19 +35,20 @@ struct CreditClockTimelineProvider: TimelineProvider {
         }
         completion(CreditClockEntry(
             date: Date(),
-            snapshots: result.snapshots,
+            snapshots: patched.snapshots,
             isRefreshing: refreshStateStore.isRefreshing(),
-            debugInfo: result.debug
+            debugInfo: "\(result.debug) | overlay=\(patched.debug)"
         ))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<CreditClockEntry>) -> Void) {
         let result = store.loadWithDiagnostics()
+        let patched = WidgetLocalUsageOverlay.patch(result.snapshots)
         let entry = CreditClockEntry(
             date: Date(),
-            snapshots: result.snapshots,
+            snapshots: patched.snapshots,
             isRefreshing: refreshStateStore.isRefreshing(),
-            debugInfo: result.debug
+            debugInfo: "\(result.debug) | overlay=\(patched.debug)"
         )
         let nextUpdate = Calendar.current.date(byAdding: .minute, value: 1, to: Date()) ?? Date().addingTimeInterval(60)
         completion(Timeline(entries: [entry], policy: .after(nextUpdate)))
@@ -150,7 +152,12 @@ private struct WidgetServiceQuotaRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: metrics.rowSpacing) {
             VStack(spacing: 0) {
-                CircularCountdownRing(progress: countdownProgress, color: quotaColor(for: snapshot.fiveHourRemaining))
+                CircularCountdownRing(
+                    progress: countdownProgress,
+                    color: quotaColor(for: snapshot.fiveHourRemaining),
+                    label: "5h",
+                    labelFont: metrics.ringCenterFont
+                )
                     .frame(width: metrics.ringSize, height: metrics.ringSize)
 
                 Spacer()
@@ -160,6 +167,8 @@ private struct WidgetServiceQuotaRow: View {
                     .font(metrics.timeFont.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .allowsTightening(true)
             }
             .frame(width: metrics.ringBlockWidth, alignment: .center)
 
@@ -183,15 +192,7 @@ private struct WidgetServiceQuotaRow: View {
     }
 
     private var remainingTimeText: String {
-        let seconds = max(snapshot.fiveHourRefillDate.timeIntervalSinceNow, 0)
-        if seconds < 60 { return "<1m" }
-
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.day, .hour, .minute]
-        formatter.unitsStyle = .abbreviated
-        formatter.maximumUnitCount = 2
-        formatter.zeroFormattingBehavior = .dropLeading
-        return formatter.string(from: seconds) ?? "0m"
+        snapshot.fiveHourRefillRemainingText
     }
 
     private func quotaColor(for remaining: Double) -> Color {
@@ -274,6 +275,7 @@ private struct WidgetLayoutMetrics {
     let labelFont: Font
     let percentFont: Font
     let timeFont: Font
+    let ringCenterFont: Font
     let updatedFont: Font
 
     static let medium = WidgetLayoutMetrics(
@@ -282,8 +284,8 @@ private struct WidgetLayoutMetrics {
         cardSpacing: 4,
         rowSpacing: 7,
         ringTimeGap: 5,
-        ringSize: 19,
-        ringBlockWidth: 33,
+        ringSize: 22,
+        ringBlockWidth: 50,
         lineSpacing: 1,
         rowHorizontalPadding: 6,
         rowVerticalPadding: 4,
@@ -297,6 +299,7 @@ private struct WidgetLayoutMetrics {
         labelFont: .system(size: 10, weight: .semibold),
         percentFont: .system(size: 10, weight: .semibold, design: .rounded),
         timeFont: .system(size: 9, weight: .medium, design: .rounded),
+        ringCenterFont: .system(size: 8, weight: .semibold, design: .rounded),
         updatedFont: .system(size: 10)
     )
 
@@ -306,8 +309,8 @@ private struct WidgetLayoutMetrics {
         cardSpacing: 5,
         rowSpacing: 8,
         ringTimeGap: 6,
-        ringSize: 21,
-        ringBlockWidth: 38,
+        ringSize: 24,
+        ringBlockWidth: 58,
         lineSpacing: 2,
         rowHorizontalPadding: 7,
         rowVerticalPadding: 5,
@@ -321,8 +324,123 @@ private struct WidgetLayoutMetrics {
         labelFont: .system(size: 11, weight: .semibold),
         percentFont: .system(size: 11, weight: .semibold, design: .rounded),
         timeFont: .system(size: 10, weight: .medium, design: .rounded),
+        ringCenterFont: .system(size: 9, weight: .semibold, design: .rounded),
         updatedFont: .caption2
     )
+}
+
+private enum WidgetLocalUsageOverlay {
+    static func patch(_ snapshots: [ServiceSnapshot]) -> (snapshots: [ServiceSnapshot], debug: String) {
+        var debug: [String] = []
+        let patched = snapshots.map { snapshot in
+            switch snapshot.id {
+            case "anthropic":
+                if let info = readClaudeCache() {
+                    debug.append("claude:cache")
+                    return apply(info: info, to: snapshot)
+                }
+                debug.append("claude:none")
+                return snapshot
+            case "openai":
+                if let info = readCodexCache() {
+                    debug.append("codex:cache")
+                    return apply(info: info, to: snapshot)
+                }
+                debug.append("codex:none")
+                return snapshot
+            default:
+                return snapshot
+            }
+        }
+        return (patched, debug.joined(separator: ","))
+    }
+
+    private static func apply(info: LocalCacheInfo, to snapshot: ServiceSnapshot) -> ServiceSnapshot {
+        let updatedAt = max(snapshot.updatedAt, info.updatedAt)
+        return ServiceSnapshot(
+            id: snapshot.id,
+            name: snapshot.name,
+            usageUsed: snapshot.usageUsed,
+            usageLimit: snapshot.usageLimit,
+            refillAt: info.fiveHourRefillAt ?? snapshot.refillAt,
+            subscriptionState: snapshot.subscriptionState,
+            updatedAt: updatedAt,
+            fiveHourUtilization: snapshot.fiveHourUtilization,
+            weeklyUtilization: snapshot.weeklyUtilization,
+            fiveHourRefillAt: info.fiveHourRefillAt ?? snapshot.fiveHourRefillAt,
+            weeklyRefillAt: info.weeklyRefillAt ?? snapshot.weeklyRefillAt
+        )
+    }
+
+    private static func readClaudeCache() -> LocalCacheInfo? {
+        let path = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
+            .appendingPathComponent(".claude/plugins/oh-my-claudecode/.usage-cache.json")
+        return readCache(at: path, maxAgeMs: 300_000)
+    }
+
+    private static func readCodexCache() -> LocalCacheInfo? {
+        let path = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
+            .appendingPathComponent(".codex/.usage-cache.json")
+        return readCache(at: path, maxAgeMs: 1_800_000)
+    }
+
+    private static func readCache(at url: URL, maxAgeMs: Double) -> LocalCacheInfo? {
+        guard let data = try? Data(contentsOf: url),
+              let cache = try? JSONDecoder().decode(LocalUsageCache.self, from: data),
+              cache.error != true,
+              let usage = cache.data else { return nil }
+
+        let age = Date().timeIntervalSince1970 * 1000 - cache.timestamp
+        guard age >= 0, age < maxAgeMs else { return nil }
+
+        return LocalCacheInfo(
+            updatedAt: Date(timeIntervalSince1970: cache.timestamp / 1000),
+            fiveHourRefillAt: parseISO8601(usage.fiveHourResetsAt),
+            weeklyRefillAt: parseISO8601(usage.weeklyResetsAt)
+        )
+    }
+
+    private static func parseISO8601(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        if let date = isoWithFractional.date(from: raw) {
+            return date
+        }
+        return isoStandard.date(from: raw)
+    }
+
+    private static let isoWithFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let isoStandard: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+}
+
+private struct LocalCacheInfo {
+    let updatedAt: Date
+    let fiveHourRefillAt: Date?
+    let weeklyRefillAt: Date?
+}
+
+private struct LocalUsageCache: Decodable {
+    let timestamp: Double
+    let data: Usage?
+    let error: Bool?
+
+    struct Usage: Decodable {
+        let fiveHourResetsAt: String?
+        let weeklyResetsAt: String?
+
+        enum CodingKeys: String, CodingKey {
+            case fiveHourResetsAt = "fiveHourResetsAt"
+            case weeklyResetsAt = "weeklyResetsAt"
+        }
+    }
 }
 
 // MARK: - Circular Countdown Ring
@@ -330,6 +448,8 @@ private struct WidgetLayoutMetrics {
 struct CircularCountdownRing: View {
     let progress: Double
     let color: Color
+    let label: String
+    let labelFont: Font
 
     var body: some View {
         ZStack {
@@ -339,6 +459,9 @@ struct CircularCountdownRing: View {
                 .trim(from: 0, to: progress)
                 .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+            Text(label)
+                .font(labelFont.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 }

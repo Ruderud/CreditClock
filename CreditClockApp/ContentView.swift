@@ -102,15 +102,15 @@ private struct ServiceRow: View {
             }
 
             QuotaProgressLine(
-                title: "5-hour refill",
+                title: "5h",
                 remainingFraction: snapshot.fiveHourRemaining,
-                refillAt: snapshot.fiveHourRefillDate
+                remainingTimeText: snapshot.fiveHourRefillRemainingText
             )
 
             QuotaProgressLine(
-                title: "Weekly refill",
+                title: "1w",
                 remainingFraction: snapshot.weeklyRemaining,
-                refillAt: snapshot.weeklyRefillDate
+                remainingTimeText: snapshot.weeklyRefillRemainingText
             )
         }
         .padding(12)
@@ -130,7 +130,7 @@ private struct ServiceRow: View {
 private struct QuotaProgressLine: View {
     let title: String
     let remainingFraction: Double
-    let refillAt: Date
+    let remainingTimeText: String
 
     private var clampedRemaining: Double {
         min(max(remainingFraction, 0), 1)
@@ -149,7 +149,7 @@ private struct QuotaProgressLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("\(title) · \(relativeFormatter.localizedString(for: refillAt, relativeTo: Date()))")
+                Text("\(title) · \(remainingTimeText)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -162,12 +162,6 @@ private struct QuotaProgressLine: View {
             ProgressView(value: clampedRemaining)
                 .tint(tintColor)
         }
-    }
-
-    private var relativeFormatter: RelativeDateTimeFormatter {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
     }
 }
 

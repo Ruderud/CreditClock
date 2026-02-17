@@ -52,17 +52,14 @@ struct AnthropicProviderAdapter: ServiceProvider {
         let fiveHour = usage.fiveHourPercent ?? 0
         let weekly = usage.weeklyPercent ?? 0
 
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
         let fiveHourReset: Date
-        if let resetStr = usage.fiveHourResetsAt, let d = iso.date(from: resetStr) {
+        if let d = parseISO8601Date(usage.fiveHourResetsAt) {
             fiveHourReset = d
         } else {
             fiveHourReset = Date().addingTimeInterval(3600)
         }
         let weeklyReset: Date
-        if let resetStr = usage.weeklyResetsAt, let d = iso.date(from: resetStr) {
+        if let d = parseISO8601Date(usage.weeklyResetsAt) {
             weeklyReset = d
         } else {
             weeklyReset = Date().addingTimeInterval(7 * 24 * 3600)
@@ -106,17 +103,14 @@ struct AnthropicProviderAdapter: ServiceProvider {
         let fiveHour = Int(decoded.fiveHour?.utilization ?? 0)
         let weekly = Int(decoded.sevenDay?.utilization ?? 0)
 
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
         let resetDate: Date
-        if let resetStr = decoded.fiveHour?.resetsAt, let d = iso.date(from: resetStr) {
+        if let d = parseISO8601Date(decoded.fiveHour?.resetsAt) {
             resetDate = d
         } else {
             resetDate = Date().addingTimeInterval(3600)
         }
         let weeklyReset: Date
-        if let resetStr = decoded.sevenDay?.resetsAt, let d = iso.date(from: resetStr) {
+        if let d = parseISO8601Date(decoded.sevenDay?.resetsAt) {
             weeklyReset = d
         } else {
             weeklyReset = Date().addingTimeInterval(7 * 24 * 3600)
@@ -170,6 +164,26 @@ struct AnthropicProviderAdapter: ServiceProvider {
         guard let creds = try? JSONDecoder().decode(ClaudeCredentials.self, from: data) else { return nil }
         return creds.claudeAiOauth?.accessToken ?? creds.accessToken
     }
+
+    private func parseISO8601Date(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        if let parsed = Self.iso8601WithFractional.date(from: value) {
+            return parsed
+        }
+        return Self.iso8601Standard.date(from: value)
+    }
+
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let iso8601Standard: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 }
 
 // MARK: - OAuth API Response

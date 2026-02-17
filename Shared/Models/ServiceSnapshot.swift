@@ -78,6 +78,14 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
         weeklyRefillAt ?? refillAt
     }
 
+    var fiveHourRefillRemainingText: String {
+        formatRemainingHM(until: fiveHourRefillDate)
+    }
+
+    var weeklyRefillRemainingText: String {
+        formatRemainingDHM(until: weeklyRefillDate)
+    }
+
     var refillDescription: String {
         ServiceSnapshot.relativeFormatter.localizedString(for: refillAt, relativeTo: Date())
     }
@@ -125,6 +133,22 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
         guard total > 0 else { return 1 }
         let elapsed = Date().timeIntervalSince(updatedAt)
         return min(max(elapsed / total, 0), 1)
+    }
+
+    private func formatRemainingHM(until target: Date) -> String {
+        let remainingMinutes = max(Int(ceil(target.timeIntervalSinceNow / 60)), 0)
+        let hours = remainingMinutes / 60
+        let minutes = remainingMinutes % 60
+        return "\(hours)h \(minutes)m"
+    }
+
+    private func formatRemainingDHM(until target: Date) -> String {
+        let remainingMinutes = max(Int(ceil(target.timeIntervalSinceNow / 60)), 0)
+        let days = remainingMinutes / (24 * 60)
+        let dayRemainder = remainingMinutes % (24 * 60)
+        let hours = dayRemainder / 60
+        let minutes = dayRemainder % 60
+        return "\(days)day \(hours)h \(minutes)m"
     }
 }
 
