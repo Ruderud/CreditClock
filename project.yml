@@ -2,7 +2,7 @@ name: CreditClock
 options:
   minimumXcodeGenVersion: 2.39.0
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "11.0"
 configs:
   Debug: debug
   Release: release
