@@ -8,5 +8,9 @@
     <array>
         <string>group.com.creditclock.shared</string>
     </array>
+    <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+    <array>
+        <string>.creditclock/</string>
+    </array>
 </dict>
 </plist>

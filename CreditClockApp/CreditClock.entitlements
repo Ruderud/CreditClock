@@ -17,5 +17,10 @@
 		<string>.claude/</string>
 		<string>.codex/</string>
 	</array>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+	<array>
+		<string>.creditclock/</string>
+		<string>Library/Containers/com.creditclock.app.widget/</string>
+	</array>
 </dict>
 </plist>

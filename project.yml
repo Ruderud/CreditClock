@@ -49,6 +49,9 @@ targets:
         com.apple.security.temporary-exception.files.home-relative-path.read-only:
           - .claude/
           - .codex/
+        com.apple.security.temporary-exception.files.home-relative-path.read-write:
+          - .creditclock/
+          - Library/Containers/com.creditclock.app.widget/
     dependencies:
       - target: CreditClockWidgetExtension
 
@@ -78,3 +81,5 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
           - group.com.creditclock.shared
+        com.apple.security.temporary-exception.files.home-relative-path.read-only:
+          - .creditclock/

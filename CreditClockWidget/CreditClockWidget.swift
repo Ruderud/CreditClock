@@ -4,28 +4,51 @@ import WidgetKit
 struct CreditClockEntry: TimelineEntry {
     let date: Date
     let snapshots: [ServiceSnapshot]
+    let isRefreshing: Bool
+    let debugInfo: String
 }
 
 struct CreditClockTimelineProvider: TimelineProvider {
     private let store = SnapshotStore()
+    private let refreshStateStore = RefreshStateStore()
 
     func placeholder(in context: Context) -> CreditClockEntry {
-        CreditClockEntry(date: Date(), snapshots: ServiceSnapshot.samples)
+        CreditClockEntry(
+            date: Date(),
+            snapshots: ServiceSnapshot.samples,
+            isRefreshing: false,
+            debugInfo: "preview"
+        )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (CreditClockEntry) -> Void) {
-        let snapshots = store.load()
+        let result = store.loadWithDiagnostics()
         if context.isPreview {
-            completion(CreditClockEntry(date: Date(), snapshots: ServiceSnapshot.samples))
+            completion(CreditClockEntry(
+                date: Date(),
+                snapshots: ServiceSnapshot.samples,
+                isRefreshing: false,
+                debugInfo: "preview"
+            ))
             return
         }
-        completion(CreditClockEntry(date: Date(), snapshots: snapshots))
+        completion(CreditClockEntry(
+            date: Date(),
+            snapshots: result.snapshots,
+            isRefreshing: refreshStateStore.isRefreshing(),
+            debugInfo: result.debug
+        ))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<CreditClockEntry>) -> Void) {
-        let snapshots = store.load()
-        let entry = CreditClockEntry(date: Date(), snapshots: snapshots)
-        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
+        let result = store.loadWithDiagnostics()
+        let entry = CreditClockEntry(
+            date: Date(),
+            snapshots: result.snapshots,
+            isRefreshing: refreshStateStore.isRefreshing(),
+            debugInfo: result.debug
+        )
+        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 1, to: Date()) ?? Date().addingTimeInterval(60)
         completion(Timeline(entries: [entry], policy: .after(nextUpdate)))
     }
 }
@@ -48,17 +71,29 @@ struct CreditClockWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("AI Credits")
-                .font(.headline)
+            HStack {
+                Text("AI Credits")
+                    .font(.headline)
+                Spacer()
+                if entry.isRefreshing {
+                    Text("Refreshing...")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if entry.snapshots.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("No synced data")
+                    Text(entry.isRefreshing ? "Syncing data..." : "No synced data")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("Open CreditClock and refresh once.")
+                    Text(entry.isRefreshing ? "Please wait a moment." : "Open CreditClock and refresh once.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                    Text(entry.debugInfo)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(3)
                 }
             } else {
                 ForEach(entry.snapshots.prefix(4)) { snapshot in
@@ -140,5 +175,5 @@ struct CircularCountdownRing: View {
 #Preview(as: .systemMedium) {
     CreditClockWidget()
 } timeline: {
-    CreditClockEntry(date: Date(), snapshots: ServiceSnapshot.samples)
+    CreditClockEntry(date: Date(), snapshots: ServiceSnapshot.samples, isRefreshing: false, debugInfo: "preview")
 }

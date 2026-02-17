@@ -8,9 +8,11 @@ struct ProviderSettingsView: View {
     @State private var apiKeyInputs: [String: String] = [:]
     @State private var testResults: [String: TestResult] = [:]
     @State private var localAccessState: [LocalDataSource: Bool] = [:]
+    @State private var connectionState: [ProviderId: Bool] = [:]
     @State private var localAccessMessage: String?
 
     private let credentialStore: CredentialStore = KeychainCredentialStore()
+    private let connectionStore = ProviderConnectionStore()
 
     var body: some View {
         Form {
@@ -31,13 +33,18 @@ struct ProviderSettingsView: View {
         .onAppear {
             loadSavedKeys()
             refreshLocalAccessState()
+            loadConnectionState()
         }
     }
 
     private var localAccessSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Grant one-time folder access for local usage caches.")
+            Text("Grant one-time folder access for local usage caches. Choose home folder once to cover both Codex and Claude.")
                 .foregroundStyle(.secondary)
+
+            Button("Grant Codex + Claude Together (Recommended)") {
+                _ = requestLocalAccess(for: .codex)
+            }
 
             ForEach(LocalDataSource.allCases) { source in
                 HStack {
@@ -53,7 +60,7 @@ struct ProviderSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(localAccessState[source] == true ? .green : .secondary)
                     Button(localAccessState[source] == true ? "Re-select" : "Grant Access") {
-                        requestLocalAccess(for: source)
+                        _ = requestLocalAccess(for: source)
                     }
                     if localAccessState[source] == true {
                         Button("Clear") {
@@ -74,8 +81,61 @@ struct ProviderSettingsView: View {
     @ViewBuilder
     private func providerCard(account: Binding<ProviderAccount>) -> some View {
         let id = account.wrappedValue.id
+        let provider = account.wrappedValue.provider
 
-        Toggle("Enabled", isOn: account.isEnabled)
+        if provider == .openai || provider == .anthropic {
+            localProviderCard(for: provider, id: id)
+        } else {
+            apiKeyProviderCard(account: account, id: id)
+        }
+    }
+
+    @ViewBuilder
+    private func localProviderCard(for provider: ProviderId, id: String) -> some View {
+        LabeledContent("Auth Method") {
+            Text(provider == .openai ? "Local Codex files" : "Claude local cache / OAuth")
+                .foregroundStyle(.secondary)
+        }
+
+        HStack {
+            Text(connectionState[provider] == true ? "Connected" : "Not connected")
+                .foregroundStyle(connectionState[provider] == true ? .green : .secondary)
+            Spacer()
+            Button("Connect") {
+                connect(provider)
+            }
+            .disabled(connectionState[provider] == true)
+
+            Button("Disconnect") {
+                disconnect(provider)
+            }
+            .disabled(connectionState[provider] != true)
+
+            Button("Test") {
+                Task { await testConnection(for: provider) }
+            }
+            .disabled(connectionState[provider] != true)
+        }
+
+        if let result = testResults[id] {
+            Label(result.message, systemImage: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(result.success ? .green : .red)
+                .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func apiKeyProviderCard(account: Binding<ProviderAccount>, id: String) -> some View {
+        Toggle(
+            "Enabled",
+            isOn: Binding(
+                get: { connectionState[account.wrappedValue.provider] ?? false },
+                set: {
+                    connectionStore.setConnected($0, for: account.wrappedValue.provider)
+                    connectionState[account.wrappedValue.provider] = $0
+                }
+            )
+        )
 
         LabeledContent("Auth Method") {
             Text("API Key")
@@ -91,7 +151,7 @@ struct ProviderSettingsView: View {
             }
 
             Button("Test") {
-                Task { await testConnection(for: account.wrappedValue) }
+                Task { await testConnection(for: account.wrappedValue.provider) }
             }
         }
 
@@ -123,15 +183,17 @@ struct ProviderSettingsView: View {
         guard !key.isEmpty, !key.contains("*") else { return }
         do {
             try credentialStore.save(key: account.credentialsRef, value: key)
+            connectionStore.setConnected(true, for: account.provider)
+            connectionState[account.provider] = true
             testResults[account.id] = TestResult(success: true, message: "Key saved")
         } catch {
             testResults[account.id] = TestResult(success: false, message: error.localizedDescription)
         }
     }
 
-    private func testConnection(for account: ProviderAccount) async {
+    private func testConnection(for providerId: ProviderId) async {
         let provider: ServiceProvider
-        switch account.provider {
+        switch providerId {
         case .openai: provider = OpenAIProviderAdapter()
         case .anthropic: provider = AnthropicProviderAdapter()
         case .gemini: provider = GeminiProviderAdapter()
@@ -139,21 +201,21 @@ struct ProviderSettingsView: View {
 
         do {
             _ = try await provider.fetchSnapshot()
-            testResults[account.id] = TestResult(success: true, message: "Connected")
+            testResults[providerId.rawValue] = TestResult(success: true, message: "Connected")
         } catch {
-            testResults[account.id] = TestResult(success: false, message: error.localizedDescription)
+            testResults[providerId.rawValue] = TestResult(success: false, message: error.localizedDescription)
         }
     }
 
     private func refreshLocalAccessState() {
         var next: [LocalDataSource: Bool] = [:]
         for source in LocalDataSource.allCases {
-            next[source] = ExternalDataAccess.shared.hasBookmark(for: source)
+            next[source] = ExternalDataAccess.shared.isConfigured(for: source)
         }
         localAccessState = next
     }
 
-    private func requestLocalAccess(for source: LocalDataSource) {
+    private func requestLocalAccess(for source: LocalDataSource) -> Bool {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -161,27 +223,39 @@ struct ProviderSettingsView: View {
         panel.canCreateDirectories = false
         panel.showsHiddenFiles = true
         panel.title = "\(source.displayName) Folder Access"
-        panel.message = "Choose the \(source.expectedDirectoryName) folder once to stop repeated permission prompts."
+        panel.message = "Choose your home folder to grant Codex + Claude together, or choose only \(source.expectedDirectoryName)."
         panel.prompt = "Grant Access"
         panel.directoryURL = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
 
-        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
-        guard selectedURL.lastPathComponent == source.expectedDirectoryName else {
-            localAccessMessage = "Please select ~/\(source.expectedDirectoryName)"
-            return
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return false }
+
+        let standardizedSelected = selectedURL.standardizedFileURL
+        let homeURL = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true).standardizedFileURL
+
+        guard standardizedSelected == homeURL || standardizedSelected.lastPathComponent == source.expectedDirectoryName else {
+            localAccessMessage = "Please select your home folder or ~/\(source.expectedDirectoryName)"
+            return false
         }
 
         do {
-            let bookmark = try selectedURL.bookmarkData(
+            let bookmark = try standardizedSelected.bookmarkData(
                 options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
-            ExternalDataAccess.shared.saveBookmark(bookmark, for: source)
-            localAccessMessage = "\(source.displayName) access granted."
+            if standardizedSelected == homeURL {
+                ExternalDataAccess.shared.saveBookmark(bookmark, for: .codex)
+                ExternalDataAccess.shared.saveBookmark(bookmark, for: .claude)
+                localAccessMessage = "Codex + Claude access granted together."
+            } else {
+                ExternalDataAccess.shared.saveBookmark(bookmark, for: source)
+                localAccessMessage = "\(source.displayName) access granted."
+            }
             refreshLocalAccessState()
+            return true
         } catch {
             localAccessMessage = "Failed to save bookmark: \(error.localizedDescription)"
+            return false
         }
     }
 
@@ -189,6 +263,37 @@ struct ProviderSettingsView: View {
         ExternalDataAccess.shared.clearBookmark(for: source)
         localAccessMessage = "\(source.displayName) access removed."
         refreshLocalAccessState()
+    }
+
+    private func loadConnectionState() {
+        var next: [ProviderId: Bool] = [:]
+        for provider in ProviderId.allCases {
+            next[provider] = connectionStore.isConnected(provider)
+        }
+        connectionState = next
+    }
+
+    private func connect(_ provider: ProviderId) {
+        switch provider {
+        case .openai:
+            guard ExternalDataAccess.shared.isConfigured(for: .codex) || requestLocalAccess(for: .codex) else { return }
+        case .anthropic:
+            if !ExternalDataAccess.shared.isConfigured(for: .claude) {
+                _ = requestLocalAccess(for: .claude)
+            }
+        case .gemini:
+            break
+        }
+
+        connectionStore.setConnected(true, for: provider)
+        connectionState[provider] = true
+        testResults[provider.rawValue] = TestResult(success: true, message: "Connected")
+    }
+
+    private func disconnect(_ provider: ProviderId) {
+        connectionStore.setConnected(false, for: provider)
+        connectionState[provider] = false
+        testResults[provider.rawValue] = TestResult(success: true, message: "Disconnected")
     }
 }
 

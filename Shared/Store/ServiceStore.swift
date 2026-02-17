@@ -12,6 +12,7 @@ final class ServiceStore: ObservableObject {
     private var providers: [ServiceProvider]
     private let snapshotStore: SnapshotStore
     private let credentialStore: CredentialStore
+    private let refreshStateStore: RefreshStateStore
 
     var hasConfiguredProviders: Bool {
         !ServiceStore.buildProviders(credentialStore: credentialStore).isEmpty
@@ -20,10 +21,13 @@ final class ServiceStore: ObservableObject {
     init(
         providers: [ServiceProvider]? = nil,
         snapshotStore: SnapshotStore = SnapshotStore(),
-        credentialStore: CredentialStore = KeychainCredentialStore()
+        credentialStore: CredentialStore = KeychainCredentialStore(),
+        refreshStateStore: RefreshStateStore = RefreshStateStore()
     ) {
         self.credentialStore = credentialStore
         self.snapshotStore = snapshotStore
+        self.refreshStateStore = refreshStateStore
+        self.refreshStateStore.setRefreshing(false)
 
         if let providers {
             self.providers = providers
@@ -36,9 +40,11 @@ final class ServiceStore: ObservableObject {
     }
 
     func refresh() async {
+        let refreshStartedAt = Date()
         isRefreshing = true
+        refreshStateStore.setRefreshing(true)
+        WidgetCenter.shared.reloadAllTimelines()
         lastError = nil
-        defer { isRefreshing = false }
 
         providers = ServiceStore.buildProviders(credentialStore: credentialStore)
         let previousByServiceId = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
@@ -48,6 +54,7 @@ final class ServiceStore: ObservableObject {
             // local folder access is not configured yet.
             snapshotStore.save(snapshots)
             WidgetCenter.shared.reloadAllTimelines()
+            await finishRefresh(startedAt: refreshStartedAt)
             return
         }
 
@@ -73,10 +80,13 @@ final class ServiceStore: ObservableObject {
             }
         }
 
-        guard !next.isEmpty else { return }
-        snapshots = next.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        snapshotStore.save(snapshots)
-        WidgetCenter.shared.reloadAllTimelines()
+        if !next.isEmpty {
+            snapshots = next.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            snapshotStore.save(snapshots)
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+
+        await finishRefresh(startedAt: refreshStartedAt)
     }
 
     /// Returns true on success (for PollingScheduler)
@@ -85,17 +95,28 @@ final class ServiceStore: ObservableObject {
         return lastError == nil
     }
 
+    private func finishRefresh(startedAt: Date) async {
+        let minRefreshingDisplaySeconds: TimeInterval = 1.5
+        let elapsed = Date().timeIntervalSince(startedAt)
+        if elapsed < minRefreshingDisplaySeconds {
+            let wait = minRefreshingDisplaySeconds - elapsed
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        }
+
+        isRefreshing = false
+        refreshStateStore.setRefreshing(false)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
     private static func buildProviders(credentialStore: CredentialStore) -> [ServiceProvider] {
         var result: [ServiceProvider] = []
-        let access = ExternalDataAccess.shared
+        let connections = ProviderConnectionStore()
 
-        // Anthropic: include when OAuth creds exist or .claude folder access was granted.
-        if AnthropicProviderAdapter.hasOAuthCredentials() || access.isConfigured(for: .claude) {
+        if connections.isConnected(.anthropic) {
             result.append(AnthropicProviderAdapter())
         }
 
-        // OpenAI Codex: include only after .codex access is configured.
-        if access.isConfigured(for: .codex) {
+        if connections.isConnected(.openai) {
             result.append(OpenAIProviderAdapter())
         }
 
@@ -105,7 +126,7 @@ final class ServiceStore: ObservableObject {
             let ref = "com.creditclock.\(provider.rawValue).credential"
             let hasKey = (try? credentialStore.load(key: ref))?.isEmpty == false
 
-            if hasKey {
+            if hasKey && connections.isConnected(provider) {
                 switch provider {
                 case .gemini:
                     result.append(GeminiProviderAdapter(credentialStore: credentialStore))

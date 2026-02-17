@@ -5,21 +5,17 @@ struct AnthropicProviderAdapter: ServiceProvider {
     let serviceId = "anthropic"
 
     func fetchSnapshot() async throws -> ServiceSnapshot {
-        // Strategy 1: Direct OAuth API call using Claude Code credentials from Keychain
-        if let oauthResult = try await fetchViaOAuth() {
-            return oauthResult
-        }
-
-        // Strategy 2: Read from OMC cache (fallback)
+        // Strategy 1: Read from OMC cache first to avoid frequent keychain prompts.
         if let cached = readOMCCache() {
             return cached
         }
 
-        throw ProviderError.notAuthenticated("Claude (no OAuth credentials or folder access)")
-    }
+        // Strategy 2: Direct OAuth API call using Claude Code credentials from Keychain.
+        if let oauthResult = try await fetchViaOAuth() {
+            return oauthResult
+        }
 
-    static func hasOAuthCredentials() -> Bool {
-        readClaudeCodeOAuthTokenStatic() != nil
+        throw ProviderError.notAuthenticated("Claude (no OAuth credentials or folder access)")
     }
 
     // MARK: - Strategy 1: OMC Usage Cache
