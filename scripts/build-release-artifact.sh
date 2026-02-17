@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 if [ ! -f "CreditClock.xcodeproj/project.pbxproj" ]; then
   if command -v xcodegen >/dev/null 2>&1; then
-    echo "[release] CreditClock.xcodeproj not found. Running xcodegen generate..."
+    echo "[release] CreditClock.xcodeproj not found. Running xcodegen generate..." >&2
     xcodegen generate
   else
     echo "[release] xcodegen is required to generate CreditClock.xcodeproj" >&2
@@ -23,7 +23,7 @@ BUILD_LOG="$ARTIFACT_DIR/build.log"
 mkdir -p "$ARTIFACT_DIR"
 rm -rf "$DERIVED_DATA_DIR" "$ASSET_PATH"
 
-echo "[release] Building Release app..."
+echo "[release] Building Release app..." >&2
 set +e
 xcodebuild \
   -project "CreditClock.xcodeproj" \
@@ -48,7 +48,7 @@ if [ ! -d "$APP_PATH" ]; then
   exit 1
 fi
 
-echo "[release] Packaging artifact..."
+echo "[release] Packaging artifact..." >&2
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ASSET_PATH"
 
 echo "$ASSET_PATH"
