@@ -18,15 +18,15 @@
 ## Screenshots
 
 <p align="center">
-  <img src="./docs/images/creditclock-app-main.png" width="640" alt="CreditClock main desktop app" />
+  <img src="./docs/images/creditclock-app-main.png" width="620" alt="CreditClock main desktop app" />
 </p>
 
 <p align="center">
-  <img src="./docs/images/creditclock-widget-large.png" width="340" alt="CreditClock widget" />
+  <img src="./docs/images/creditclock-widget-large.png" width="330" alt="CreditClock widget" />
 </p>
 
 <p align="center">
-  <img src="./docs/images/creditclock-showcase.png" width="520" alt="CreditClock showcase" />
+  <img src="./docs/images/creditclock-showcase.png" width="470" alt="CreditClock showcase" />
 </p>
 
 ## What You Get

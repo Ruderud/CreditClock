@@ -18,15 +18,15 @@
 ## 스크린샷
 
 <p align="center">
-  <img src="./docs/images/creditclock-app-main.png" width="640" alt="CreditClock 메인 데스크탑 앱" />
+  <img src="./docs/images/creditclock-app-main.png" width="620" alt="CreditClock 메인 데스크탑 앱" />
 </p>
 
 <p align="center">
-  <img src="./docs/images/creditclock-widget-large.png" width="340" alt="CreditClock 위젯" />
+  <img src="./docs/images/creditclock-widget-large.png" width="330" alt="CreditClock 위젯" />
 </p>
 
 <p align="center">
-  <img src="./docs/images/creditclock-showcase.png" width="520" alt="CreditClock 쇼케이스" />
+  <img src="./docs/images/creditclock-showcase.png" width="470" alt="CreditClock 쇼케이스" />
 </p>
 
 ## CreditClock로 할 수 있는 것
