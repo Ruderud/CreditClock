@@ -2,15 +2,22 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var store: ServiceStore
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
-            List(store.snapshots) { snapshot in
-                ServiceRow(snapshot: snapshot)
-                    .listRowSeparator(.hidden)
-                    .padding(.vertical, 6)
+            Group {
+                if store.snapshots.isEmpty {
+                    emptyStateView
+                } else {
+                    List(store.snapshots) { snapshot in
+                        ServiceRow(snapshot: snapshot)
+                            .listRowSeparator(.hidden)
+                            .padding(.vertical, 6)
+                    }
+                    .listStyle(.plain)
+                }
             }
-            .listStyle(.plain)
             .navigationTitle("CreditClock")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -25,6 +32,26 @@ struct ContentView: View {
                     }
                     .disabled(store.isRefreshing)
                 }
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                }
+            }
+            .sheet(isPresented: $showSettings, onDismiss: {
+                Task { await store.refresh() }
+            }) {
+                NavigationStack {
+                    ProviderSettingsView()
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showSettings = false }
+                            }
+                        }
+                }
+                .frame(minWidth: 500, minHeight: 400)
             }
         }
         .overlay(alignment: .bottom) {
@@ -36,6 +63,24 @@ struct ContentView: View {
                     .padding(.bottom, 12)
             }
         }
+    }
+
+    private var emptyStateView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("No providers configured")
+                .font(.title2)
+            Text("Add your API keys in Settings to start tracking usage.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+            Button("Open Settings") {
+                showSettings = true
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
