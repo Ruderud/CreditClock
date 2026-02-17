@@ -9,20 +9,30 @@ while IFS= read -r file; do
   SHARED_SWIFT_FILES+=("$file")
 done < <(find Shared -type f -name '*.swift' | sort)
 
+APP_SWIFT_FILES=()
+while IFS= read -r file; do
+  APP_SWIFT_FILES+=("$file")
+done < <(find CreditClockApp -type f -name '*.swift' | sort)
+
+WIDGET_SWIFT_FILES=()
+while IFS= read -r file; do
+  WIDGET_SWIFT_FILES+=("$file")
+done < <(find CreditClockWidget -type f -name '*.swift' | sort)
+
 if [ "${#SHARED_SWIFT_FILES[@]}" -eq 0 ]; then
   echo "No Swift files found under Shared/."
   exit 1
 fi
 
-APP_SWIFT_FILES=(
-  CreditClockApp/CreditClockApp.swift
-  CreditClockApp/ContentView.swift
-)
+if [ "${#APP_SWIFT_FILES[@]}" -eq 0 ]; then
+  echo "No Swift files found under CreditClockApp/."
+  exit 1
+fi
 
-WIDGET_SWIFT_FILES=(
-  CreditClockWidget/CreditClockWidgetBundle.swift
-  CreditClockWidget/CreditClockWidget.swift
-)
+if [ "${#WIDGET_SWIFT_FILES[@]}" -eq 0 ]; then
+  echo "No Swift files found under CreditClockWidget/."
+  exit 1
+fi
 
 echo "[check] Type-check shared files"
 xcrun swiftc -typecheck "${SHARED_SWIFT_FILES[@]}"

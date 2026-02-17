@@ -1,8 +1,16 @@
 .DS_Store
 .build
 DerivedData
+*.xcodeproj
+*.xcworkspace
 *.xcodeproj/xcuserdata
 *.xcworkspace/xcuserdata
 *.swp
 .claude/
 .omc/
+.env
+.env.*
+*.pem
+*.p8
+*.key
+*.mobileprovision

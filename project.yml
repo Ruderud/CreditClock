@@ -2,10 +2,27 @@ name: CreditClock
 options:
   minimumXcodeGenVersion: 2.39.0
   deploymentTarget:
-    macOS: "11.0"
+    macOS: "14.0"
 configs:
   Debug: debug
   Release: release
+schemes:
+  CreditClock:
+    build:
+      targets:
+        CreditClock: all
+        CreditClockWidgetExtension: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+  CreditClockWidgetExtension:
+    build:
+      targets:
+        CreditClockWidgetExtension: all
+    run:
+      config: Debug
+
 targets:
   CreditClock:
     type: application
@@ -17,6 +34,7 @@ targets:
       PRODUCT_BUNDLE_IDENTIFIER: com.creditclock.app
       PRODUCT_NAME: CreditClock
       SWIFT_VERSION: 5.10
+      GENERATE_INFOPLIST_FILE: YES
       INFOPLIST_KEY_CFBundleDisplayName: CreditClock
       INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
       CODE_SIGN_STYLE: Automatic
@@ -27,6 +45,9 @@ targets:
         com.apple.security.network.client: true
         com.apple.security.application-groups:
           - group.com.creditclock.shared
+        com.apple.security.temporary-exception.files.home-relative-path.read-only:
+          - .claude/
+          - .codex/
     dependencies:
       - target: CreditClockWidgetExtension
 
@@ -35,16 +56,21 @@ targets:
     platform: macOS
     sources:
       - path: CreditClockWidget
+        excludes:
+          - Info.plist
       - path: Shared
+    info:
+      path: CreditClockWidget/Info.plist
+      properties:
+        CFBundleDisplayName: CreditClock Widget
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.creditclock.app.widget
       PRODUCT_NAME: CreditClockWidget
       SWIFT_VERSION: 5.10
       CODE_SIGN_STYLE: Automatic
       APPLICATION_EXTENSION_API_ONLY: true
-      INFOPLIST_KEY_CFBundleDisplayName: CreditClock Widget
-      INFOPLIST_KEY_NSExtensionPointIdentifier: com.apple.widgetkit-extension
-      INFOPLIST_KEY_NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).CreditClockWidgetBundle
     entitlements:
       path: CreditClockWidget/CreditClockWidget.entitlements
       properties:
