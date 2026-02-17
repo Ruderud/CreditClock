@@ -32,7 +32,9 @@ CreditClock brings them into one place so you can quickly answer:
 - **Refill Countdown**: See refill/reset timing per service at a glance.
 - **Subscription Health**: Monitor plan state (`active`, `trial`, `paused`, `expired`).
 - **macOS Widget**: View the same shared data directly from your desktop widget.
-- **App Group Data Sharing**: App and widget stay synced through shared persistence.
+- **Permission-on-Connect Flow**: Local folder access is requested only when you press `Connect` in Settings.
+- **Bundled Local Access Grant**: One prompt can grant both Codex and Claude local folders.
+- **Resilient Widget Sync**: Uses App Group first, then file bridge fallbacks for local/dev signing environments.
 - **Provider Abstraction**: Plug in real API providers without changing UI layers.
 
 ## Tech Stack
@@ -42,7 +44,7 @@ CreditClock brings them into one place so you can quickly answer:
 | Language | Swift 5.10 |
 | App UI | SwiftUI (macOS) |
 | Widget | WidgetKit |
-| Data Sharing | App Groups + `UserDefaults(suiteName:)` |
+| Data Sharing | App Groups + shared files (`snapshots.json`, refresh state) + widget bridge fallback |
 | Project Generator | XcodeGen |
 
 ## Architecture
@@ -80,6 +82,21 @@ open CreditClock.xcodeproj
 
 Then run the `CreditClock` scheme.
 
+## Run And Permission Setup
+
+1. Launch the app (`CreditClock` scheme).
+2. Open `Settings`.
+3. In `Local Data Access`, click `Grant Codex + Claude Together (Recommended)`.
+4. Choose your home directory once (or choose `~/.codex` / `~/.claude` individually).
+5. Press `Connect` for `OpenAI` and/or `Anthropic`.
+6. For API-key providers (for example `Gemini`), save the key and enable the provider.
+7. Click `Refresh` in the app.
+8. Add the CreditClock widget (or re-add it once after first setup).
+
+Notes:
+- The app no longer asks all credentials/permissions at first launch.
+- The widget shows `Refreshing...` while refresh state is in progress.
+
 ## Commit Automation (Husky-Style)
 
 CreditClock uses a Git `pre-commit` hook (via `.husky/`) to enforce baseline quality and version metadata:
@@ -114,6 +131,19 @@ let provider = JSONEndpointProvider(serviceId: "example", request: request) { da
     // Decode response and map into ServiceSnapshot
 }
 ```
+
+## Personal Team vs Paid Team (Important)
+
+- With a paid Apple Developer team, `App Groups` usually work as expected for app-widget sync.
+- With `Personal Team`, App Group access may be partially restricted in runtime for widgets.
+- CreditClock includes fallback sync paths for this case:
+  - `~/.creditclock/snapshots.json`
+  - `~/Library/Containers/com.creditclock.app.widget/Data/Documents/snapshots.json`
+
+If the widget still shows `No synced data`:
+1. Run app refresh once.
+2. Remove and re-add the widget.
+3. Check the debug line under `No synced data` in the widget to see which source failed.
 
 ## Roadmap
 

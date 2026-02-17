@@ -32,7 +32,9 @@ CreditClock는 이를 하나로 모아 아래 질문에 즉시 답할 수 있게
 - **리필 카운트다운**: 서비스별 리필/초기화 타이밍 빠르게 파악
 - **구독 상태 확인**: `active`, `trial`, `paused`, `expired` 상태 추적
 - **macOS 위젯 지원**: 데스크탑 위젯에서 핵심 정보 즉시 확인
-- **App Group 데이터 공유**: 앱과 위젯 간 스냅샷 동기화
+- **Connect 시점 권한 요청**: 앱 설치 직후가 아니라 설정에서 `Connect`할 때만 로컬 권한 요청
+- **Codex+Claude 권한 묶음 승인**: 한 번의 선택으로 두 로컬 폴더 권한 설정 가능
+- **위젯 동기화 이중 경로**: App Group 우선, 로컬/개인 팀 환경에서는 파일 브리지 fallback 사용
 - **Provider 추상화**: UI 변경 없이 실제 API Provider 연결 가능
 
 ## 기술 스택
@@ -42,7 +44,7 @@ CreditClock는 이를 하나로 모아 아래 질문에 즉시 답할 수 있게
 | Language | Swift 5.10 |
 | App UI | SwiftUI (macOS) |
 | Widget | WidgetKit |
-| 데이터 공유 | App Groups + `UserDefaults(suiteName:)` |
+| 데이터 공유 | App Groups + 공유 파일(`snapshots.json`, refresh state) + 위젯 브리지 fallback |
 | 프로젝트 생성 | XcodeGen |
 
 ## 아키텍처
@@ -80,6 +82,21 @@ open CreditClock.xcodeproj
 
 그 다음 `CreditClock` 스킴을 실행하세요.
 
+## 실행 및 권한 설정
+
+1. `CreditClock` 스킴으로 앱 실행
+2. `Settings` 열기
+3. `Local Data Access`에서 `Grant Codex + Claude Together (Recommended)` 클릭
+4. 홈 폴더 1회 선택 (또는 `~/.codex`, `~/.claude` 개별 선택)
+5. `OpenAI`, `Anthropic`는 각각 `Connect` 버튼으로 연결
+6. API 키 기반 Provider(예: `Gemini`)는 키 저장 후 활성화
+7. 앱에서 `Refresh` 실행
+8. 위젯을 추가(초기 1회는 제거 후 재추가 권장)
+
+참고:
+- 앱 최초 실행 시 모든 권한/크리덴셜을 한 번에 묻지 않습니다.
+- 리프레시 중에는 위젯에 `Refreshing...`가 표시됩니다.
+
 ## 커밋 자동화 (Husky 스타일)
 
 CreditClock는 `.husky/` 기반 `pre-commit` 훅으로 기본 품질/버전 메타데이터를 자동 처리합니다.
@@ -114,6 +131,19 @@ let provider = JSONEndpointProvider(serviceId: "example", request: request) { da
     // 응답 디코딩 후 ServiceSnapshot으로 매핑
 }
 ```
+
+## Personal Team / 유료 팀 차이 (중요)
+
+- 유료 Apple Developer 팀에서는 `App Groups` 기반 앱-위젯 동기화가 일반적으로 정상 동작합니다.
+- `Personal Team`에서는 위젯 런타임에서 App Group 접근이 제한될 수 있습니다.
+- CreditClock는 이를 위해 fallback 경로를 함께 사용합니다:
+  - `~/.creditclock/snapshots.json`
+  - `~/Library/Containers/com.creditclock.app.widget/Data/Documents/snapshots.json`
+
+위젯에 계속 `No synced data`가 뜨면:
+1. 앱에서 `Refresh` 1회 실행
+2. 위젯 제거 후 재추가
+3. 위젯 하단 debug 문구로 실패 경로 확인
 
 ## 로드맵
 
