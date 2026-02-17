@@ -1,161 +1,164 @@
-[English](./README.md) | [Korean](./README.ko.md)
+[English](./README.md) | [한국어](./README.ko.md)
 
 <h1 align="center">CreditClock</h1>
 
 <p align="center">
-  One dashboard for AI plan usage, refill times, and subscription health.
+  Track AI subscription usage, refill timers, and plan status in one place.
   <br />
-  Built for macOS with SwiftUI + WidgetKit.
+  macOS app + desktop widget for Codex, Claude, and Gemini.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-macOS%2014%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="macOS 14+" />
   <img src="https://img.shields.io/badge/Swift-5.10-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift 5.10" />
   <img src="https://img.shields.io/badge/UI-SwiftUI%20%2B%20WidgetKit-0A84FF?style=flat-square" alt="SwiftUI + WidgetKit" />
-  <img src="https://img.shields.io/badge/Status-MVP-5E5CE6?style=flat-square" alt="MVP" />
-  <img src="https://img.shields.io/badge/Open%20Source-Yes-22C55E?style=flat-square" alt="Open Source" />
   <img src="https://img.shields.io/badge/License-MIT-2563EB?style=flat-square" alt="MIT License" />
 </p>
 
-## Why CreditClock
+## Screenshots
 
-Most AI subscriptions expose usage in different places and different formats.
-CreditClock brings them into one place so you can quickly answer:
+<p align="center">
+  <img src="./docs/images/creditclock-app-main.png" width="640" alt="CreditClock main desktop app" />
+</p>
 
-- How much quota is left right now?
-- When does each plan refill?
-- Is each subscription active, trial, paused, or expired?
+<p align="center">
+  <img src="./docs/images/creditclock-widget-large.png" width="340" alt="CreditClock widget" />
+</p>
 
-## Features
+<p align="center">
+  <img src="./docs/images/creditclock-showcase.png" width="520" alt="CreditClock showcase" />
+</p>
 
-- **Unified Usage View**: Track usage and remaining credits across providers in one list.
-- **Refill Countdown**: See refill/reset timing per service at a glance.
-- **Subscription Health**: Monitor plan state (`active`, `trial`, `paused`, `expired`).
-- **macOS Widget**: View the same shared data directly from your desktop widget.
-- **Permission-on-Connect Flow**: Local folder access is requested only when you press `Connect` in Settings.
-- **Bundled Local Access Grant**: One prompt can grant both Codex and Claude local folders.
-- **Resilient Widget Sync**: Uses App Group first, then file bridge fallbacks for local/dev signing environments.
-- **Provider Abstraction**: Plug in real API providers without changing UI layers.
+## What You Get
 
-## Tech Stack
+- Unified usage tracking across providers in one dashboard.
+- Refill countdowns for multiple quota windows (for example, `5h`, `1w`, daily).
+- Subscription state indicators (`Active`, `Trial`, `Paused`, `Expired`).
+- WidgetKit support (`systemMedium`, `systemLarge`) with shared app data.
+- Menu bar quick view with one-click refresh.
 
-| Layer | Technology |
-|---|---|
-| Language | Swift 5.10 |
-| App UI | SwiftUI (macOS) |
-| Widget | WidgetKit |
-| Data Sharing | App Groups + shared files (`snapshots.json`, refresh state) + widget bridge fallback |
-| Project Generator | XcodeGen |
+## Supported Providers
 
-## Architecture
+| Provider | Data Source | Setup in App |
+|---|---|---|
+| Codex (`OpenAI`) | Local `~/.codex` usage cache/session logs, with JWT fallback | Grant local folder access + click `Connect` |
+| Claude (`Anthropic`) | Local `~/.claude/plugins/oh-my-claudecode/.usage-cache.json` or Anthropic OAuth usage endpoint | Grant local folder access + click `Connect` |
+| Gemini | Local `~/.gemini/oauth_creds.json` (CLI OAuth quota) or Gemini API key fallback | Grant local folder access for CLI OAuth, or save API key + enable |
 
-```text
-CreditClock/
-├── CreditClockApp/                 # macOS SwiftUI app
-├── CreditClockWidget/              # WidgetKit extension
-├── Shared/
-│   ├── Models/                     # ServiceSnapshot, states
-│   ├── Persistence/                # App Group storage
-│   ├── Providers/                  # Provider protocol + implementations
-│   └── Store/                      # App state + refresh flow
-└── project.yml                     # XcodeGen project definition
-```
+## Installation (macOS)
 
-Core design choices:
+Prerequisites:
 
-- Keep provider logic isolated behind `ServiceProvider`.
-- Keep app and widget in sync using a shared snapshot store.
-- Keep UI independent from API details via mapped `ServiceSnapshot` data.
-
-## Quick Start
+- macOS 14+
+- Xcode 15+
+- Homebrew + `xcodegen`
 
 ```bash
-# 1) Install xcodegen if you don't have it
 brew install xcodegen
-
-# 2) Generate the Xcode project
 xcodegen generate
-
-# 3) Open in Xcode
 open CreditClock.xcodeproj
 ```
 
-Then run the `CreditClock` scheme.
+In Xcode, run the `CreditClock` scheme.
 
-## Run And Permission Setup
+## How To Use
 
-1. Launch the app (`CreditClock` scheme).
-2. Open `Settings`.
-3. In `Local Data Access`, click `Grant Codex + Claude Together (Recommended)`.
-4. Choose your home directory once (or choose `~/.codex` / `~/.claude` individually).
-5. Press `Connect` for `OpenAI` and/or `Anthropic`.
-6. For API-key providers (for example `Gemini`), save the key and enable the provider.
-7. Click `Refresh` in the app.
-8. Add the CreditClock widget (or re-add it once after first setup).
+1. Launch `CreditClock`.
+2. Open `Settings` from the gear button.
+3. In `Local Data Access`, click `Grant Codex + Claude + Gemini Together (Recommended)`.
+4. Select your home folder (`~`) once.
+5. Configure providers:
+   - `OpenAI`, `Anthropic`: click `Connect`.
+   - `Gemini`: use local CLI OAuth (`~/.gemini/oauth_creds.json`) or save an API key.
+6. Click `Test` per provider (optional but recommended).
+7. Close settings and click `Refresh` in the main window.
+8. Add the CreditClock widget to your desktop.
 
-Notes:
-- The app no longer asks all credentials/permissions at first launch.
-- The widget shows `Refreshing...` while refresh state is in progress.
+> Installation note (as of February 17, 2026): CreditClock is not code-signed yet, so install/run it directly from Xcode (`CreditClock` scheme).
 
-## Commit Automation (Husky-Style)
+## Troubleshooting
 
-CreditClock uses a Git `pre-commit` hook (via `.husky/`) to enforce baseline quality and version metadata:
+- `No providers configured`: open `Settings` and connect at least one provider.
+- Widget shows `No synced data`: refresh once in app, then remove/re-add the widget.
+- Folder access errors: re-open `Settings` and re-grant local access.
 
-- Runs Swift type-checks for shared/app/widget sources.
-- Auto-bumps patch version in `VERSION` on each commit.
-- Regenerates and stages `/Shared/Generated/BuildVersion.generated.swift`.
+## Privacy
 
-If hooks are not active in your local clone, run:
+- Local provider data is read from your machine (`~/.codex`, `~/.claude`, `~/.gemini`).
+- API keys are stored in macOS Keychain.
+- Snapshot sync between app and widget uses App Group plus local fallback paths.
+
+<details>
+<summary><strong>Development</strong></summary>
+
+### Tech Stack
+
+- Swift 5.10
+- SwiftUI (macOS app)
+- WidgetKit (desktop widget)
+- XcodeGen project generation (`project.yml`)
+
+### Project Structure
+
+```text
+CreditClock/
+├── CreditClockApp/                 # macOS app (main window + settings + menu bar)
+├── CreditClockWidget/              # WidgetKit extension
+├── Shared/
+│   ├── Models/                     # Snapshot/state models
+│   ├── Persistence/                # App Group, fallback storage, keychain wrappers
+│   ├── Providers/                  # OpenAI/Anthropic/Gemini adapters
+│   └── Store/                      # Refresh orchestration + polling
+├── scripts/                        # Type-check, version bump, release helpers
+└── project.yml                     # XcodeGen source of truth
+```
+
+### Local Development
+
+```bash
+# Generate Xcode project
+xcodegen generate
+
+# Run Swift type checks used by pre-commit
+./scripts/typecheck.sh
+```
+
+### Pre-commit Automation
+
+`.husky/pre-commit` runs:
+
+1. `scripts/bump-version.sh` (patch bump in `VERSION` + regenerate `Shared/Generated/BuildVersion.generated.swift`)
+2. `scripts/typecheck.sh`
+
+Enable hooks in a fresh clone:
 
 ```bash
 git config core.hooksPath .husky
 ```
 
-## Real API Integration
+If needed, skip version bump once:
 
-Current providers are mock-based for MVP development.
-To connect real services (OpenAI, Anthropic, Gemini, etc.):
-
-1. Replace `ProviderCatalog.defaultProviders()` in `Shared/Providers/MockProviders.swift`.
-2. Create service-specific providers with `Shared/Providers/JSONEndpointProvider.swift`.
-3. Map each API response into `ServiceSnapshot`.
-4. Store API tokens in Keychain (recommended), not in source.
-
-Conceptual example:
-
-```swift
-var request = URLRequest(url: URL(string: "https://api.example.com/usage")!)
-request.addValue("Bearer <token>", forHTTPHeaderField: "Authorization")
-
-let provider = JSONEndpointProvider(serviceId: "example", request: request) { data in
-    // Decode response and map into ServiceSnapshot
-}
+```bash
+CREDITCLOCK_SKIP_VERSION_BUMP=1 git commit -m "your message"
 ```
 
-## Personal Team vs Paid Team (Important)
+### Build / Release Scripts
 
-- With a paid Apple Developer team, `App Groups` usually work as expected for app-widget sync.
-- With `Personal Team`, App Group access may be partially restricted in runtime for widgets.
-- CreditClock includes fallback sync paths for this case:
-  - `~/.creditclock/snapshots.json`
-  - `~/Library/Containers/com.creditclock.app.widget/Data/Documents/snapshots.json`
+```bash
+# Build unsigned Release app and zip artifact
+./scripts/build-release-artifact.sh
 
-If the widget still shows `No synced data`:
-1. Run app refresh once.
-2. Remove and re-add the widget.
-3. Check the debug line under `No synced data` in the widget to see which source failed.
+# Build and upload/update GitHub release tag main-latest (requires gh auth)
+./scripts/upload-main-release.sh
+```
 
-## Roadmap
+### Data Sync Notes
 
-- [x] Add first-party providers for OpenAI / Anthropic / Gemini
-- [ ] Add per-service refill policy modeling (fixed reset, billing cycle, rolling window)
-- [x] Add retry/backoff and stale-cache policy for failures
-- [x] Add settings UI for account tokens and provider enable/disable
-- [x] Menu bar mode (MenuBarExtra)
+- Primary sync: App Group container (`group.com.creditclock.shared`).
+- Fallback sync: `~/.creditclock/snapshots.json`.
+- Widget bridge fallback: `~/Library/Containers/com.creditclock.app.widget/Data/Documents/snapshots.json`.
 
-## Open Source
-
-CreditClock is an **open-source program**. Contributions, feedback, and issue reports are welcome.
+</details>
 
 ## License
 

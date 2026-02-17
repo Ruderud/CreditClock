@@ -1,162 +1,167 @@
-[English](./README.md) | [Korean](./README.ko.md)
+[English](./README.md) | [한국어](./README.ko.md)
 
 <h1 align="center">CreditClock</h1>
 
 <p align="center">
-  AI 구독 사용량, 리필 시간, 구독 상태를 한 번에 보여주는 대시보드.
+  AI 구독 사용량, 리필 시간, 플랜 상태를 한 화면에서 확인하세요.
   <br />
-  SwiftUI + WidgetKit 기반 macOS 앱입니다.
+  Codex, Claude, Gemini를 위한 macOS 앱 + 데스크탑 위젯입니다.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-macOS%2014%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="macOS 14+" />
   <img src="https://img.shields.io/badge/Swift-5.10-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift 5.10" />
   <img src="https://img.shields.io/badge/UI-SwiftUI%20%2B%20WidgetKit-0A84FF?style=flat-square" alt="SwiftUI + WidgetKit" />
-  <img src="https://img.shields.io/badge/Status-MVP-5E5CE6?style=flat-square" alt="MVP" />
-  <img src="https://img.shields.io/badge/Open%20Source-Yes-22C55E?style=flat-square" alt="Open Source" />
   <img src="https://img.shields.io/badge/License-MIT-2563EB?style=flat-square" alt="MIT License" />
 </p>
 
-## CreditClock가 필요한 이유
+## 스크린샷
 
-AI 서비스마다 사용량 확인 위치와 포맷이 다릅니다.
-CreditClock는 이를 하나로 모아 아래 질문에 즉시 답할 수 있게 합니다.
+<p align="center">
+  <img src="./docs/images/creditclock-app-main.png" width="640" alt="CreditClock 메인 데스크탑 앱" />
+</p>
 
-- 지금 남은 크레딧은 얼마인가?
-- 서비스별 리필(초기화) 시점은 언제인가?
-- 구독 상태가 활성/체험/일시중지/만료 중 무엇인가?
+<p align="center">
+  <img src="./docs/images/creditclock-widget-large.png" width="340" alt="CreditClock 위젯" />
+</p>
 
-## 주요 기능
+<p align="center">
+  <img src="./docs/images/creditclock-showcase.png" width="520" alt="CreditClock 쇼케이스" />
+</p>
 
-- **통합 사용량 뷰**: 여러 서비스의 사용량과 잔여량을 한 화면에서 확인
-- **리필 카운트다운**: 서비스별 리필/초기화 타이밍 빠르게 파악
-- **구독 상태 확인**: `active`, `trial`, `paused`, `expired` 상태 추적
-- **macOS 위젯 지원**: 데스크탑 위젯에서 핵심 정보 즉시 확인
-- **Connect 시점 권한 요청**: 앱 설치 직후가 아니라 설정에서 `Connect`할 때만 로컬 권한 요청
-- **Codex+Claude 권한 묶음 승인**: 한 번의 선택으로 두 로컬 폴더 권한 설정 가능
-- **위젯 동기화 이중 경로**: App Group 우선, 로컬/개인 팀 환경에서는 파일 브리지 fallback 사용
-- **Provider 추상화**: UI 변경 없이 실제 API Provider 연결 가능
+## CreditClock로 할 수 있는 것
 
-## 기술 스택
+- 여러 AI 서비스 사용량을 한 대시보드에서 통합 확인
+- `5h`, `1w`, 일 단위 등 리필 카운트다운 확인
+- 구독 상태(`Active`, `Trial`, `Paused`, `Expired`) 빠른 파악
+- WidgetKit 위젯(`systemMedium`, `systemLarge`)으로 데스크탑에서 바로 확인
+- 메뉴바에서 즉시 상태 확인 및 수동 리프레시
 
-| 레이어 | 기술 |
-|---|---|
-| Language | Swift 5.10 |
-| App UI | SwiftUI (macOS) |
-| Widget | WidgetKit |
-| 데이터 공유 | App Groups + 공유 파일(`snapshots.json`, refresh state) + 위젯 브리지 fallback |
-| 프로젝트 생성 | XcodeGen |
+## 지원 Provider
 
-## 아키텍처
+| Provider | 데이터 소스 | 앱에서 설정 방법 |
+|---|---|---|
+| Codex (`OpenAI`) | 로컬 `~/.codex` 사용량 캐시/세션 로그, JWT fallback | 로컬 폴더 권한 승인 + `Connect` |
+| Claude (`Anthropic`) | 로컬 `~/.claude/plugins/oh-my-claudecode/.usage-cache.json` 또는 Anthropic OAuth usage endpoint | 로컬 폴더 권한 승인 + `Connect` |
+| Gemini | 로컬 `~/.gemini/oauth_creds.json` (CLI OAuth 쿼터) 또는 Gemini API 키 fallback | CLI OAuth를 위한 로컬 폴더 권한 승인, 또는 API 키 저장 + 활성화 |
 
-```text
-CreditClock/
-├── CreditClockApp/                 # macOS SwiftUI 앱
-├── CreditClockWidget/              # WidgetKit 확장
-├── Shared/
-│   ├── Models/                     # ServiceSnapshot, 상태 모델
-│   ├── Persistence/                # App Group 저장소
-│   ├── Providers/                  # Provider 프로토콜 + 구현체
-│   └── Store/                      # 앱 상태 + 리프레시 흐름
-└── project.yml                     # XcodeGen 정의
-```
+## 설치 방법 (macOS)
 
-핵심 설계 원칙:
+사전 준비:
 
-- API 연결 로직은 `ServiceProvider` 뒤로 분리
-- 앱/위젯은 공용 스냅샷 저장소로 동기화
-- UI는 `ServiceSnapshot` 기준으로 API 세부사항과 분리
-
-## 빠른 시작
+- macOS 14 이상
+- Xcode 15 이상
+- Homebrew + `xcodegen`
 
 ```bash
-# 1) xcodegen 설치 (미설치 시)
 brew install xcodegen
-
-# 2) Xcode 프로젝트 생성
 xcodegen generate
-
-# 3) Xcode에서 열기
 open CreditClock.xcodeproj
 ```
 
-그 다음 `CreditClock` 스킴을 실행하세요.
+Xcode에서 `CreditClock` 스킴을 실행하세요.
 
-## 실행 및 권한 설정
+## 사용 방법
 
-1. `CreditClock` 스킴으로 앱 실행
-2. `Settings` 열기
-3. `Local Data Access`에서 `Grant Codex + Claude Together (Recommended)` 클릭
-4. 홈 폴더 1회 선택 (또는 `~/.codex`, `~/.claude` 개별 선택)
-5. `OpenAI`, `Anthropic`는 각각 `Connect` 버튼으로 연결
-6. API 키 기반 Provider(예: `Gemini`)는 키 저장 후 활성화
-7. 앱에서 `Refresh` 실행
-8. 위젯을 추가(초기 1회는 제거 후 재추가 권장)
+1. `CreditClock` 앱을 실행합니다.
+2. 우측 상단 톱니 버튼으로 `Settings`를 엽니다.
+3. `Local Data Access`에서 `Grant Codex + Claude + Gemini Together (Recommended)`를 누릅니다.
+4. 홈 폴더(`~`)를 1회 선택합니다.
+5. Provider를 설정합니다.
+   - `OpenAI`, `Anthropic`: `Connect` 클릭
+   - `Gemini`: 로컬 CLI OAuth(`~/.gemini/oauth_creds.json`)를 사용하거나 API 키를 저장
+6. Provider별 `Test` 실행 (선택이지만 권장)
+7. 설정 창을 닫고 메인 화면에서 `Refresh`를 누릅니다.
+8. 데스크탑에 CreditClock 위젯을 추가합니다.
 
-참고:
-- 앱 최초 실행 시 모든 권한/크리덴셜을 한 번에 묻지 않습니다.
-- 리프레시 중에는 위젯에 `Refreshing...`가 표시됩니다.
+> 설치 안내 (2026-02-17 기준): CreditClock는 아직 코드사이닝되지 않아 실제 설치/실행은 Xcode에서 `CreditClock` 스킴으로 직접 진행해야 합니다.
 
-## 커밋 자동화 (Husky 스타일)
+## 문제 해결
 
-CreditClock는 `.husky/` 기반 `pre-commit` 훅으로 기본 품질/버전 메타데이터를 자동 처리합니다.
+- `No providers configured`: `Settings`에서 최소 1개 Provider를 연결하세요.
+- 위젯에 `No synced data` 표시: 앱에서 `Refresh` 1회 후 위젯을 제거/재추가하세요.
+- 폴더 권한 오류: `Settings`에서 로컬 권한을 다시 승인하세요.
 
-- Shared/App/Widget Swift 소스 타입체크 실행
-- 커밋마다 `VERSION` 패치 버전 자동 증가
-- `/Shared/Generated/BuildVersion.generated.swift` 재생성 및 자동 스테이징
+## 개인정보/보안
 
-로컬 클론에서 훅이 비활성화되어 있다면 아래를 실행하세요.
+- 로컬 Provider 데이터는 사용자 기기 경로(`~/.codex`, `~/.claude`, `~/.gemini`)에서 읽습니다.
+- API 키는 macOS Keychain에 저장됩니다.
+- 앱-위젯 동기화는 App Group + 로컬 fallback 경로를 함께 사용합니다.
+
+<details>
+<summary><strong>Development</strong></summary>
+
+### 기술 스택
+
+- Swift 5.10
+- SwiftUI (macOS 앱)
+- WidgetKit (데스크탑 위젯)
+- XcodeGen (`project.yml` 기반 프로젝트 생성)
+
+### 프로젝트 구조
+
+```text
+CreditClock/
+├── CreditClockApp/                 # macOS 앱 (메인 화면 + 설정 + 메뉴바)
+├── CreditClockWidget/              # WidgetKit 확장
+├── Shared/
+│   ├── Models/                     # 스냅샷/상태 모델
+│   ├── Persistence/                # App Group, fallback 저장소, keychain 래퍼
+│   ├── Providers/                  # OpenAI/Anthropic/Gemini 어댑터
+│   └── Store/                      # 리프레시 오케스트레이션 + 폴링
+├── scripts/                        # 타입체크, 버전 증가, 릴리스 스크립트
+└── project.yml                     # XcodeGen 기준 파일
+```
+
+### 로컬 개발
+
+```bash
+# Xcode 프로젝트 생성
+xcodegen generate
+
+# pre-commit과 동일한 Swift 타입체크 실행
+./scripts/typecheck.sh
+```
+
+### Pre-commit 자동화
+
+`.husky/pre-commit`에서 아래 순서로 실행합니다.
+
+1. `scripts/bump-version.sh`
+   - `VERSION` 패치 버전 증가
+   - `Shared/Generated/BuildVersion.generated.swift` 재생성
+2. `scripts/typecheck.sh`
+
+새 클론에서 훅 활성화:
 
 ```bash
 git config core.hooksPath .husky
 ```
 
-## 실제 API 연동
+필요 시 1회 버전 증가 스킵:
 
-현재는 MVP 개발을 위해 Mock Provider를 사용합니다.
-OpenAI, Anthropic, Gemini 등 실제 서비스 연동 시:
-
-1. `Shared/Providers/MockProviders.swift`의 `ProviderCatalog.defaultProviders()`를 실제 Provider로 교체
-2. `Shared/Providers/JSONEndpointProvider.swift`로 서비스별 Provider 구성
-3. API 응답을 `ServiceSnapshot`으로 매핑
-4. API 토큰은 소스가 아닌 Keychain에 저장
-
-개념 예시:
-
-```swift
-var request = URLRequest(url: URL(string: "https://api.example.com/usage")!)
-request.addValue("Bearer <token>", forHTTPHeaderField: "Authorization")
-
-let provider = JSONEndpointProvider(serviceId: "example", request: request) { data in
-    // 응답 디코딩 후 ServiceSnapshot으로 매핑
-}
+```bash
+CREDITCLOCK_SKIP_VERSION_BUMP=1 git commit -m "your message"
 ```
 
-## Personal Team / 유료 팀 차이 (중요)
+### 빌드 / 릴리스 스크립트
 
-- 유료 Apple Developer 팀에서는 `App Groups` 기반 앱-위젯 동기화가 일반적으로 정상 동작합니다.
-- `Personal Team`에서는 위젯 런타임에서 App Group 접근이 제한될 수 있습니다.
-- CreditClock는 이를 위해 fallback 경로를 함께 사용합니다:
-  - `~/.creditclock/snapshots.json`
-  - `~/Library/Containers/com.creditclock.app.widget/Data/Documents/snapshots.json`
+```bash
+# unsigned Release 앱 빌드 + zip 아티팩트 생성
+./scripts/build-release-artifact.sh
 
-위젯에 계속 `No synced data`가 뜨면:
-1. 앱에서 `Refresh` 1회 실행
-2. 위젯 제거 후 재추가
-3. 위젯 하단 debug 문구로 실패 경로 확인
+# main-latest GitHub release 업로드/갱신 (gh auth 필요)
+./scripts/upload-main-release.sh
+```
 
-## 로드맵
+### 데이터 동기화 참고
 
-- [ ] OpenAI / Anthropic / Gemini 1차 Provider 구현
-- [ ] 서비스별 리필 정책 모델링 (고정 시각, 결제 주기, 롤링 윈도우)
-- [ ] 실패 시 재시도/백오프/캐시 정책 강화
-- [ ] 토큰 관리 및 Provider On/Off 설정 UI 추가
-- [ ] 위젯 외 메뉴바 모드 확장 검토
+- 기본 동기화: App Group 컨테이너 (`group.com.creditclock.shared`)
+- fallback: `~/.creditclock/snapshots.json`
+- 위젯 브리지 fallback: `~/Library/Containers/com.creditclock.app.widget/Data/Documents/snapshots.json`
 
-## 오픈소스
-
-CreditClock는 **오픈소스 프로그램**입니다. 이슈/피드백/기여를 환영합니다.
+</details>
 
 ## 라이선스
 
-MIT License. 자세한 내용은 [LICENSE](./LICENSE) 참조.
+MIT License. 자세한 내용은 [LICENSE](./LICENSE)를 확인하세요.
