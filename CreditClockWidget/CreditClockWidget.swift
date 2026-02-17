@@ -180,7 +180,10 @@ private struct WidgetServiceQuotaRow: View {
     let metrics: WidgetLayoutMetrics
 
     private var countdownProgress: Double {
-        1 - snapshot.fiveHourRefillRingProgress
+        let remaining = max(snapshot.fiveHourRefillDate.timeIntervalSinceNow, 0)
+        let total = inferredPrimaryWindowDuration ?? max(snapshot.fiveHourRefillDate.timeIntervalSince(snapshot.updatedAt), 0)
+        guard total > 0 else { return remaining > 0 ? 1 : 0 }
+        return min(max(remaining / total, 0), 1)
     }
 
     var body: some View {
@@ -231,6 +234,34 @@ private struct WidgetServiceQuotaRow: View {
 
     private var ringLabel: String {
         snapshot.id == "gemini" ? "1D" : snapshot.primaryRingTitle
+    }
+
+    private var inferredPrimaryWindowDuration: TimeInterval? {
+        switch snapshot.id {
+        case "openai", "anthropic":
+            return 5 * 3600
+        case "gemini":
+            return 24 * 3600
+        default:
+            return parseWindowDuration(from: snapshot.primaryRingTitle)
+                ?? parseWindowDuration(from: snapshot.primaryQuotaTitle)
+        }
+    }
+
+    private func parseWindowDuration(from label: String) -> TimeInterval? {
+        let lowered = label.lowercased()
+        let digits = lowered.prefix { $0.isNumber }
+        guard let value = Double(digits) else { return nil }
+        if lowered.contains("day") || lowered.hasSuffix("d") {
+            return value * 24 * 3600
+        }
+        if lowered.contains("week") || lowered.hasSuffix("w") {
+            return value * 7 * 24 * 3600
+        }
+        if lowered.contains("hour") || lowered.hasSuffix("h") {
+            return value * 3600
+        }
+        return nil
     }
 
     private func quotaColor(for remaining: Double) -> Color {
