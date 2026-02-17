@@ -5,24 +5,33 @@ struct AnthropicProviderAdapter: ServiceProvider {
     let serviceId = "anthropic"
 
     func fetchSnapshot() async throws -> ServiceSnapshot {
-        // Strategy 1: Read from OMC cache (updated every 30s when Claude Code is running)
-        if let cached = readOMCCache() {
-            return cached
-        }
-
-        // Strategy 2: Direct OAuth API call using Claude Code credentials from Keychain
+        // Strategy 1: Direct OAuth API call using Claude Code credentials from Keychain
         if let oauthResult = try await fetchViaOAuth() {
             return oauthResult
         }
 
-        throw ProviderError.notAuthenticated("Claude (no OAuth credentials found)")
+        // Strategy 2: Read from OMC cache (fallback)
+        if let cached = readOMCCache() {
+            return cached
+        }
+
+        throw ProviderError.notAuthenticated("Claude (no OAuth credentials or folder access)")
+    }
+
+    static func hasOAuthCredentials() -> Bool {
+        readClaudeCodeOAuthTokenStatic() != nil
     }
 
     // MARK: - Strategy 1: OMC Usage Cache
 
     private func readOMCCache() -> ServiceSnapshot? {
-        let cachePath = realHomeDirectory() + "/.claude/plugins/oh-my-claudecode/.usage-cache.json"
-        guard let data = FileManager.default.contents(atPath: cachePath) else { return nil }
+        guard let data = ExternalDataAccess.shared.withDirectoryAccess(for: .claude, { claudeDir in
+            let cacheURL = claudeDir
+                .appendingPathComponent("plugins", isDirectory: true)
+                .appendingPathComponent("oh-my-claudecode", isDirectory: true)
+                .appendingPathComponent(".usage-cache.json")
+            return try? Data(contentsOf: cacheURL)
+        }) else { return nil }
 
         struct OMCCache: Decodable {
             let timestamp: Double
@@ -117,6 +126,10 @@ struct AnthropicProviderAdapter: ServiceProvider {
     // MARK: - Keychain OAuth Token
 
     private func readClaudeCodeOAuthToken() -> String? {
+        AnthropicProviderAdapter.readClaudeCodeOAuthTokenStatic()
+    }
+
+    private static func readClaudeCodeOAuthTokenStatic() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",

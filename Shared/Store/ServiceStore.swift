@@ -41,11 +41,13 @@ final class ServiceStore: ObservableObject {
         defer { isRefreshing = false }
 
         providers = ServiceStore.buildProviders(credentialStore: credentialStore)
+        let previousByServiceId = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
 
         guard !providers.isEmpty else {
-            snapshots = []
-            snapshotStore.save([])
-            WidgetCenter.shared.reloadAllTimelines()
+            if snapshots.isEmpty {
+                snapshotStore.save([])
+                WidgetCenter.shared.reloadAllTimelines()
+            }
             return
         }
 
@@ -65,6 +67,9 @@ final class ServiceStore: ObservableObject {
                 var health = healthMap[provider.serviceId] ?? .initial
                 health.recordFailure(error: error.localizedDescription)
                 healthMap[provider.serviceId] = health
+                if let previous = previousByServiceId[provider.serviceId] {
+                    next.append(previous)
+                }
             }
         }
 
@@ -82,13 +87,15 @@ final class ServiceStore: ObservableObject {
 
     private static func buildProviders(credentialStore: CredentialStore) -> [ServiceProvider] {
         var result: [ServiceProvider] = []
+        let access = ExternalDataAccess.shared
 
-        // Anthropic: always included (uses Claude Code OAuth or OMC cache, no API key needed)
-        result.append(AnthropicProviderAdapter())
+        // Anthropic: include when OAuth creds exist or .claude folder access was granted.
+        if AnthropicProviderAdapter.hasOAuthCredentials() || access.isConfigured(for: .claude) {
+            result.append(AnthropicProviderAdapter())
+        }
 
-        // OpenAI: included if Codex CLI directory exists
-        let codexDir = realHomeDirectory() + "/.codex"
-        if FileManager.default.fileExists(atPath: codexDir) {
+        // OpenAI Codex: include only after .codex access is configured.
+        if access.isConfigured(for: .codex) {
             result.append(OpenAIProviderAdapter())
         }
 

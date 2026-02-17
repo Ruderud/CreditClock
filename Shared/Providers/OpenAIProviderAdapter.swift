@@ -19,14 +19,16 @@ struct OpenAIProviderAdapter: ServiceProvider {
             return jwt
         }
 
-        throw ProviderError.notAuthenticated("Codex (no credentials found)")
+        throw ProviderError.notAuthenticated("Codex (folder access not granted or credentials missing)")
     }
 
     // MARK: - Strategy 1: Usage Cache
 
     private func readUsageCache() -> ServiceSnapshot? {
-        let cachePath = realHomeDirectory() + "/.codex/.usage-cache.json"
-        guard let data = FileManager.default.contents(atPath: cachePath) else { return nil }
+        guard let data = ExternalDataAccess.shared.withDirectoryAccess(for: .codex, { codexDir in
+            let cacheURL = codexDir.appendingPathComponent(".usage-cache.json")
+            return try? Data(contentsOf: cacheURL)
+        }) else { return nil }
 
         guard let cache = try? JSONDecoder().decode(CodexUsageCache.self, from: data),
               let usage = cache.data,
@@ -64,89 +66,101 @@ struct OpenAIProviderAdapter: ServiceProvider {
     // MARK: - Strategy 2: Session Log Parsing
 
     private func parseSessionLogsAndCache() -> ServiceSnapshot? {
-        let home = realHomeDirectory()
-        let sessionsDir = home + "/.codex/sessions"
-        let cal = Calendar.current
-        let today = Date()
+        ExternalDataAccess.shared.withDirectoryAccess(for: .codex) { codexDir in
+            let sessionsDir = codexDir.appendingPathComponent("sessions", isDirectory: true)
+            let cal = Calendar.current
+            let today = Date()
 
-        var latestTs = ""
-        var primaryPct = 0.0
-        var primaryResets: TimeInterval = 0
-        var secondaryPct = 0.0
-        var secondaryResets: TimeInterval = 0
-        var found = false
+            var latestTs = ""
+            var primaryPct = 0.0
+            var primaryResets: TimeInterval = 0
+            var secondaryPct = 0.0
+            var secondaryResets: TimeInterval = 0
+            var found = false
 
-        for dayOffset in 0..<3 {
-            guard let date = cal.date(byAdding: .day, value: -dayOffset, to: today) else { continue }
-            let y = cal.component(.year, from: date)
-            let m = String(format: "%02d", cal.component(.month, from: date))
-            let d = String(format: "%02d", cal.component(.day, from: date))
-            let dayDir = "\(sessionsDir)/\(y)/\(m)/\(d)"
+            for dayOffset in 0..<3 {
+                guard let date = cal.date(byAdding: .day, value: -dayOffset, to: today) else { continue }
+                let y = cal.component(.year, from: date)
+                let m = String(format: "%02d", cal.component(.month, from: date))
+                let d = String(format: "%02d", cal.component(.day, from: date))
+                let dayDir = sessionsDir.appendingPathComponent("\(y)/\(m)/\(d)", isDirectory: true)
 
-            guard let files = try? FileManager.default.contentsOfDirectory(atPath: dayDir) else { continue }
+                guard let files = try? FileManager.default.contentsOfDirectory(
+                    at: dayDir,
+                    includingPropertiesForKeys: nil
+                ) else { continue }
 
-            for file in files where file.hasSuffix(".jsonl") {
-                let path = "\(dayDir)/\(file)"
-                guard let handle = FileHandle(forReadingAtPath: path) else { continue }
-                defer { handle.closeFile() }
+                for fileURL in files where fileURL.pathExtension == "jsonl" {
+                    guard let handle = try? FileHandle(forReadingFrom: fileURL) else { continue }
+                    defer { try? handle.close() }
 
-                // Read last 100KB only for efficiency
-                let fileSize = handle.seekToEndOfFile()
-                let readSize: UInt64 = min(fileSize, 100_000)
-                handle.seek(toFileOffset: fileSize - readSize)
-                guard let data = handle.availableData as Data?,
-                      let content = String(data: data, encoding: .utf8) else { continue }
+                    // Read last 100KB only for efficiency.
+                    let fileSize = (try? handle.seekToEnd()) ?? 0
+                    let readSize: UInt64 = min(fileSize, 100_000)
+                    try? handle.seek(toOffset: fileSize - readSize)
+                    guard let data = try? handle.read(upToCount: Int(readSize)),
+                          let content = String(data: data, encoding: .utf8) else { continue }
 
-                for line in content.components(separatedBy: .newlines) {
-                    guard !line.isEmpty,
-                          line.contains("\"limit_id\":\"codex\""),
-                          !line.contains("codex_"),
-                          let lineData = line.data(using: .utf8),
-                          let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                          let payload = json["payload"] as? [String: Any],
-                          let rateLimits = payload["rate_limits"] as? [String: Any],
-                          rateLimits["limit_id"] as? String == "codex",
-                          let ts = json["timestamp"] as? String else { continue }
+                    for line in content.components(separatedBy: .newlines) {
+                        guard !line.isEmpty,
+                              line.contains("\"limit_id\":\"codex\""),
+                              !line.contains("codex_"),
+                              let lineData = line.data(using: .utf8),
+                              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                              let payload = json["payload"] as? [String: Any],
+                              let rateLimits = payload["rate_limits"] as? [String: Any],
+                              rateLimits["limit_id"] as? String == "codex",
+                              let ts = json["timestamp"] as? String else { continue }
 
-                    if ts > latestTs {
-                        latestTs = ts
-                        let primary = rateLimits["primary"] as? [String: Any]
-                        let secondary = rateLimits["secondary"] as? [String: Any]
-                        primaryPct = primary?["used_percent"] as? Double ?? 0
-                        primaryResets = primary?["resets_at"] as? TimeInterval ?? 0
-                        secondaryPct = secondary?["used_percent"] as? Double ?? 0
-                        secondaryResets = secondary?["resets_at"] as? TimeInterval ?? 0
-                        found = true
+                        if ts > latestTs {
+                            latestTs = ts
+                            let primary = rateLimits["primary"] as? [String: Any]
+                            let secondary = rateLimits["secondary"] as? [String: Any]
+                            primaryPct = primary?["used_percent"] as? Double ?? 0
+                            primaryResets = primary?["resets_at"] as? TimeInterval ?? 0
+                            secondaryPct = secondary?["used_percent"] as? Double ?? 0
+                            secondaryResets = secondary?["resets_at"] as? TimeInterval ?? 0
+                            found = true
+                        }
                     }
                 }
             }
+
+            guard found else { return nil }
+
+            // Write cache for next read.
+            writeUsageCache(
+                fiveHour: Int(primaryPct),
+                weekly: Int(secondaryPct),
+                fiveHourResets: primaryResets,
+                weeklyResets: secondaryResets,
+                codexDir: codexDir
+            )
+
+            let fiveH = Int(primaryPct)
+            let weekly = Int(secondaryPct)
+            let primaryPercent = max(fiveH, weekly)
+            let fiveHourReset = Date(timeIntervalSince1970: primaryResets)
+
+            return ServiceSnapshot(
+                id: serviceId,
+                name: "Codex — 5h:\(fiveH)% wk:\(weekly)%",
+                usageUsed: primaryPercent,
+                usageLimit: 100,
+                refillAt: fiveHourReset,
+                subscriptionState: primaryPercent >= 90 ? .paused : .active,
+                updatedAt: Date()
+            )
         }
-
-        guard found else { return nil }
-
-        // Write cache for next read
-        writeUsageCache(
-            fiveHour: Int(primaryPct), weekly: Int(secondaryPct),
-            fiveHourResets: primaryResets, weeklyResets: secondaryResets
-        )
-
-        let fiveH = Int(primaryPct)
-        let weekly = Int(secondaryPct)
-        let primaryPercent = max(fiveH, weekly)
-        let fiveHourReset = Date(timeIntervalSince1970: primaryResets)
-
-        return ServiceSnapshot(
-            id: serviceId,
-            name: "Codex — 5h:\(fiveH)% wk:\(weekly)%",
-            usageUsed: primaryPercent,
-            usageLimit: 100,
-            refillAt: fiveHourReset,
-            subscriptionState: primaryPercent >= 90 ? .paused : .active,
-            updatedAt: Date()
-        )
     }
 
-    private func writeUsageCache(fiveHour: Int, weekly: Int, fiveHourResets: TimeInterval, weeklyResets: TimeInterval) {
+    private func writeUsageCache(
+        fiveHour: Int,
+        weekly: Int,
+        fiveHourResets: TimeInterval,
+        weeklyResets: TimeInterval,
+        codexDir: URL
+    ) {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
@@ -164,16 +178,18 @@ struct OpenAIProviderAdapter: ServiceProvider {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
         if let data = try? encoder.encode(cache) {
-            let cachePath = realHomeDirectory() + "/.codex/.usage-cache.json"
-            try? data.write(to: URL(fileURLWithPath: cachePath))
+            let cacheURL = codexDir.appendingPathComponent(".usage-cache.json")
+            try? data.write(to: cacheURL, options: .atomic)
         }
     }
 
     // MARK: - Strategy 3: JWT Subscription Info
 
     private func readCodexAuth() -> ServiceSnapshot? {
-        let authPath = realHomeDirectory() + "/.codex/auth.json"
-        guard let data = FileManager.default.contents(atPath: authPath) else { return nil }
+        guard let data = ExternalDataAccess.shared.withDirectoryAccess(for: .codex, { codexDir in
+            let authURL = codexDir.appendingPathComponent("auth.json")
+            return try? Data(contentsOf: authURL)
+        }) else { return nil }
 
         guard let auth = try? JSONDecoder().decode(CodexAuth.self, from: data),
               let idToken = auth.tokens?.idToken,
