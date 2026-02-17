@@ -16,6 +16,7 @@
 	<array>
 		<string>.claude/</string>
 		<string>.codex/</string>
+		<string>.gemini/</string>
 	</array>
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
 	<array>

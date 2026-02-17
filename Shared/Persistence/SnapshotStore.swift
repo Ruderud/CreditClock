@@ -97,23 +97,34 @@ struct SnapshotStore {
             debugMessages.append("userDefaults empty")
         }
 
-        guard let latest = selectLatestCandidate(from: candidates) else {
+        guard !candidates.isEmpty else {
             return ([], debugMessages.joined(separator: " | "))
         }
 
-        // Only mirror when the freshest source is the app-group file.
-        // This prevents widget-side reads of stale fallback files from clobbering newer data.
-        if latest.source == "appGroupFile" {
-            writeFallback(latest.data)
-            writeWidgetBridge(latest.data)
+        let merged = mergeCandidates(candidates)
+        guard let latest = selectLatestCandidate(from: candidates) else {
+            return (merged, "mergedOnly count=\(merged.count)")
+        }
+
+        // Mirror when the freshest source is app-group backed.
+        // This heals stale bridge/fallback files while avoiding random clobbering from old sources.
+        if latest.source == "appGroupFile" || latest.source == "directAppGroupFile" {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            if let mergedData = try? encoder.encode(merged) {
+                writeFallback(mergedData)
+                writeWidgetBridge(mergedData)
+                AppGroup.defaults?.set(mergedData, forKey: AppGroup.snapshotKey)
+                AppGroup.defaults?.synchronize()
+            }
         }
 
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         let latestUpdatedAt = formatter.string(from: latest.latestUpdatedAt)
         return (
-            latest.snapshots,
-            "source=\(latest.source) count=\(latest.snapshots.count) latestUpdatedAt=\(latestUpdatedAt)"
+            merged,
+            "source=\(latest.source) count=\(merged.count) latestUpdatedAt=\(latestUpdatedAt)"
         )
     }
 
@@ -150,6 +161,34 @@ struct SnapshotStore {
         }
     }
 
+    private func mergeCandidates(_ candidates: [SnapshotCandidate]) -> [ServiceSnapshot] {
+        var byServiceId: [String: MergedSnapshot] = [:]
+
+        for candidate in candidates {
+            for snapshot in candidate.snapshots {
+                if let current = byServiceId[snapshot.id] {
+                    if snapshot.updatedAt > current.snapshot.updatedAt ||
+                        (snapshot.updatedAt == current.snapshot.updatedAt && candidate.priority > current.sourcePriority) {
+                        byServiceId[snapshot.id] = MergedSnapshot(
+                            snapshot: snapshot,
+                            sourcePriority: candidate.priority
+                        )
+                    }
+                } else {
+                    byServiceId[snapshot.id] = MergedSnapshot(
+                        snapshot: snapshot,
+                        sourcePriority: candidate.priority
+                    )
+                }
+            }
+        }
+
+        return byServiceId
+            .values
+            .map(\.snapshot)
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     private func sourcePriority(_ source: String) -> Int {
         switch source {
         case "appGroupFile":
@@ -177,4 +216,9 @@ private struct SnapshotCandidate {
     var latestUpdatedAt: Date {
         snapshots.map(\.updatedAt).max() ?? .distantPast
     }
+}
+
+private struct MergedSnapshot {
+    let snapshot: ServiceSnapshot
+    let sourcePriority: Int
 }

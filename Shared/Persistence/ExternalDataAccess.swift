@@ -3,6 +3,7 @@ import Foundation
 enum LocalDataSource: String, CaseIterable, Identifiable {
     case codex
     case claude
+    case gemini
 
     var id: String { rawValue }
 
@@ -10,6 +11,7 @@ enum LocalDataSource: String, CaseIterable, Identifiable {
         switch self {
         case .codex: return "Codex"
         case .claude: return "Claude"
+        case .gemini: return "Gemini CLI"
         }
     }
 
@@ -17,6 +19,7 @@ enum LocalDataSource: String, CaseIterable, Identifiable {
         switch self {
         case .codex: return ".codex"
         case .claude: return ".claude"
+        case .gemini: return ".gemini"
         }
     }
 
@@ -31,6 +34,8 @@ final class ExternalDataAccess {
     private init() {}
 
     private var defaults: UserDefaults { AppGroup.defaults ?? .standard }
+    private var activeScopedPaths = Set<String>()
+    private let accessLock = NSLock()
 
     func hasBookmark(for source: LocalDataSource) -> Bool {
         defaults.data(forKey: source.bookmarkKey) != nil
@@ -82,12 +87,7 @@ final class ExternalDataAccess {
                 saveBookmark(refreshed, for: source)
             }
 
-            let didStart = url.startAccessingSecurityScopedResource()
-            defer {
-                if didStart {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
+            ensureScopedAccessStarted(for: url)
 
             return body(resolvedDirectory(from: url, for: source))
         }
@@ -103,6 +103,24 @@ final class ExternalDataAccess {
             return bookmarkURL
         }
         return bookmarkURL.appendingPathComponent(source.expectedDirectoryName, isDirectory: true)
+    }
+
+    /// Keep security-scoped access alive per process to avoid repeated permission prompts.
+    private func ensureScopedAccessStarted(for url: URL) {
+        let standardizedPath = url.standardizedFileURL.path
+
+        accessLock.lock()
+        if activeScopedPaths.contains(standardizedPath) {
+            accessLock.unlock()
+            return
+        }
+        accessLock.unlock()
+
+        guard url.startAccessingSecurityScopedResource() else { return }
+
+        accessLock.lock()
+        activeScopedPaths.insert(standardizedPath)
+        accessLock.unlock()
     }
 
     private var isSandboxed: Bool {

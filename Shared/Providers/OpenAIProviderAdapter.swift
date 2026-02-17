@@ -61,7 +61,10 @@ struct OpenAIProviderAdapter: ServiceProvider {
             fiveHourUtilization: Double(fiveH) / 100,
             weeklyUtilization: Double(weekly) / 100,
             fiveHourRefillAt: fiveHourReset,
-            weeklyRefillAt: weeklyReset
+            weeklyRefillAt: weeklyReset,
+            primaryQuotaLabel: nil,
+            secondaryQuotaLabel: nil,
+            primaryRingLabel: nil
         )
     }
 
@@ -158,7 +161,10 @@ struct OpenAIProviderAdapter: ServiceProvider {
                 fiveHourUtilization: Double(fiveH) / 100,
                 weeklyUtilization: Double(weekly) / 100,
                 fiveHourRefillAt: fiveHourReset,
-                weeklyRefillAt: weeklyReset
+                weeklyRefillAt: weeklyReset,
+                primaryQuotaLabel: nil,
+                secondaryQuotaLabel: nil,
+                primaryRingLabel: nil
             )
         }
     }
@@ -227,7 +233,10 @@ struct OpenAIProviderAdapter: ServiceProvider {
             fiveHourUtilization: nil,
             weeklyUtilization: nil,
             fiveHourRefillAt: nil,
-            weeklyRefillAt: nil
+            weeklyRefillAt: nil,
+            primaryQuotaLabel: nil,
+            secondaryQuotaLabel: nil,
+            primaryRingLabel: nil
         )
     }
 

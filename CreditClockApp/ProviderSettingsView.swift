@@ -39,10 +39,10 @@ struct ProviderSettingsView: View {
 
     private var localAccessSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Grant one-time folder access for local usage caches. Choose home folder once to cover both Codex and Claude.")
+            Text("Grant one-time folder access for local usage caches. Choose home folder once to cover Codex, Claude, and Gemini CLI.")
                 .foregroundStyle(.secondary)
 
-            Button("Grant Codex + Claude Together (Recommended)") {
+            Button("Grant Codex + Claude + Gemini Together (Recommended)") {
                 _ = requestLocalAccess(for: .codex)
             }
 
@@ -138,7 +138,7 @@ struct ProviderSettingsView: View {
         )
 
         LabeledContent("Auth Method") {
-            Text("API Key")
+            Text(account.wrappedValue.provider == .gemini ? "Gemini CLI OAuth or API Key" : "API Key")
                 .foregroundStyle(.secondary)
         }
 
@@ -223,7 +223,7 @@ struct ProviderSettingsView: View {
         panel.canCreateDirectories = false
         panel.showsHiddenFiles = true
         panel.title = "\(source.displayName) Folder Access"
-        panel.message = "Choose your home folder to grant Codex + Claude together, or choose only \(source.expectedDirectoryName)."
+        panel.message = "Choose your home folder to grant Codex + Claude + Gemini together, or choose only \(source.expectedDirectoryName)."
         panel.prompt = "Grant Access"
         panel.directoryURL = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
 
@@ -246,7 +246,8 @@ struct ProviderSettingsView: View {
             if standardizedSelected == homeURL {
                 ExternalDataAccess.shared.saveBookmark(bookmark, for: .codex)
                 ExternalDataAccess.shared.saveBookmark(bookmark, for: .claude)
-                localAccessMessage = "Codex + Claude access granted together."
+                ExternalDataAccess.shared.saveBookmark(bookmark, for: .gemini)
+                localAccessMessage = "Codex + Claude + Gemini access granted together."
             } else {
                 ExternalDataAccess.shared.saveBookmark(bookmark, for: source)
                 localAccessMessage = "\(source.displayName) access granted."
@@ -276,11 +277,9 @@ struct ProviderSettingsView: View {
     private func connect(_ provider: ProviderId) {
         switch provider {
         case .openai:
-            guard ExternalDataAccess.shared.isConfigured(for: .codex) || requestLocalAccess(for: .codex) else { return }
+            guard ensureCombinedLocalAccess() else { return }
         case .anthropic:
-            if !ExternalDataAccess.shared.isConfigured(for: .claude) {
-                _ = requestLocalAccess(for: .claude)
-            }
+            guard ensureCombinedLocalAccess() else { return }
         case .gemini:
             break
         }
@@ -288,6 +287,55 @@ struct ProviderSettingsView: View {
         connectionStore.setConnected(true, for: provider)
         connectionState[provider] = true
         testResults[provider.rawValue] = TestResult(success: true, message: "Connected")
+    }
+
+    /// For local providers, request home-folder access once and reuse it for all sources.
+    private func ensureCombinedLocalAccess() -> Bool {
+        if ExternalDataAccess.shared.isConfigured(for: .codex),
+           ExternalDataAccess.shared.isConfigured(for: .claude),
+           ExternalDataAccess.shared.isConfigured(for: .gemini) {
+            return true
+        }
+        return requestCombinedHomeAccess()
+    }
+
+    private func requestCombinedHomeAccess() -> Bool {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.showsHiddenFiles = true
+        panel.title = "Local Folder Access"
+        panel.message = "Select your home folder once to grant Codex + Claude + Gemini CLI access together."
+        panel.prompt = "Grant Access"
+        panel.directoryURL = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return false }
+
+        let standardizedSelected = selectedURL.standardizedFileURL
+        let homeURL = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true).standardizedFileURL
+        guard standardizedSelected == homeURL else {
+            localAccessMessage = "Please select your home folder (~)."
+            return false
+        }
+
+        do {
+            let bookmark = try standardizedSelected.bookmarkData(
+                options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            ExternalDataAccess.shared.saveBookmark(bookmark, for: .codex)
+            ExternalDataAccess.shared.saveBookmark(bookmark, for: .claude)
+            ExternalDataAccess.shared.saveBookmark(bookmark, for: .gemini)
+            localAccessMessage = "Codex + Claude + Gemini access granted together."
+            refreshLocalAccessState()
+            return true
+        } catch {
+            localAccessMessage = "Failed to save bookmark: \(error.localizedDescription)"
+            return false
+        }
     }
 
     private func disconnect(_ provider: ProviderId) {

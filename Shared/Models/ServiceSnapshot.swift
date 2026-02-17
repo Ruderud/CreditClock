@@ -28,6 +28,9 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
     let weeklyUtilization: Double?
     let fiveHourRefillAt: Date?
     let weeklyRefillAt: Date?
+    let primaryQuotaLabel: String?
+    let secondaryQuotaLabel: String?
+    let primaryRingLabel: String?
 
     var remaining: Int {
         max(usageLimit - usageUsed, 0)
@@ -83,7 +86,23 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
     }
 
     var weeklyRefillRemainingText: String {
-        formatRemainingDHM(until: weeklyRefillDate)
+        let secondsToRefill = weeklyRefillDate.timeIntervalSinceNow
+        if secondsToRefill <= 48 * 3600 {
+            return formatRemainingHM(until: weeklyRefillDate)
+        }
+        return formatRemainingDHM(until: weeklyRefillDate)
+    }
+
+    var primaryQuotaTitle: String {
+        primaryQuotaLabel ?? "5h"
+    }
+
+    var secondaryQuotaTitle: String {
+        secondaryQuotaLabel ?? "1w"
+    }
+
+    var primaryRingTitle: String {
+        primaryRingLabel ?? primaryQuotaTitle
     }
 
     var refillDescription: String {
@@ -166,7 +185,10 @@ extension ServiceSnapshot {
                 fiveHourUtilization: 0.84,
                 weeklyUtilization: 0.57,
                 fiveHourRefillAt: Calendar.current.date(byAdding: .hour, value: 2, to: Date()) ?? Date(),
-                weeklyRefillAt: Calendar.current.date(byAdding: .day, value: 4, to: Date()) ?? Date()
+                weeklyRefillAt: Calendar.current.date(byAdding: .day, value: 4, to: Date()) ?? Date(),
+                primaryQuotaLabel: nil,
+                secondaryQuotaLabel: nil,
+                primaryRingLabel: nil
             ),
             ServiceSnapshot(
                 id: "anthropic",
@@ -179,7 +201,10 @@ extension ServiceSnapshot {
                 fiveHourUtilization: 0.05,
                 weeklyUtilization: 0.57,
                 fiveHourRefillAt: Calendar.current.date(byAdding: .minute, value: 59, to: Date()) ?? Date(),
-                weeklyRefillAt: Calendar.current.date(byAdding: .day, value: 6, to: Date()) ?? Date()
+                weeklyRefillAt: Calendar.current.date(byAdding: .day, value: 6, to: Date()) ?? Date(),
+                primaryQuotaLabel: nil,
+                secondaryQuotaLabel: nil,
+                primaryRingLabel: nil
             ),
             ServiceSnapshot(
                 id: "gemini",
@@ -192,7 +217,10 @@ extension ServiceSnapshot {
                 fiveHourUtilization: nil,
                 weeklyUtilization: nil,
                 fiveHourRefillAt: nil,
-                weeklyRefillAt: nil
+                weeklyRefillAt: nil,
+                primaryQuotaLabel: nil,
+                secondaryQuotaLabel: nil,
+                primaryRingLabel: nil
             )
         ]
     }

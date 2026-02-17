@@ -100,7 +100,7 @@ struct CreditClockWidgetView: View {
                 }
             } else {
                 VStack(spacing: metrics.cardSpacing) {
-                    ForEach(entry.snapshots.prefix(maxRows)) { snapshot in
+                    ForEach(prioritizedSnapshots.prefix(maxRows)) { snapshot in
                         WidgetServiceQuotaRow(snapshot: snapshot, metrics: metrics)
                     }
                 }
@@ -109,6 +109,12 @@ struct CreditClockWidgetView: View {
             Spacer(minLength: 0)
 
             HStack {
+                if hiddenCount > 0 {
+                    Text("미표기 \(hiddenCount)개")
+                        .font(metrics.updatedFont)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 Spacer()
                 Text("Updated \(entry.date.formatted(date: .omitted, time: .shortened))")
                     .font(metrics.updatedFont)
@@ -124,10 +130,10 @@ struct CreditClockWidgetView: View {
 
     private var maxRows: Int {
         switch family {
-        case .systemLarge:
-            return 4
-        default:
+        case .systemMedium:
             return 2
+        default:
+            return 4
         }
     }
 
@@ -137,6 +143,34 @@ struct CreditClockWidgetView: View {
             return .medium
         default:
             return .large
+        }
+    }
+
+    private var prioritizedSnapshots: [ServiceSnapshot] {
+        entry.snapshots.sorted { lhs, rhs in
+            let leftPriority = priority(of: lhs.id)
+            let rightPriority = priority(of: rhs.id)
+            if leftPriority != rightPriority {
+                return leftPriority < rightPriority
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private var hiddenCount: Int {
+        max(prioritizedSnapshots.count - maxRows, 0)
+    }
+
+    private func priority(of serviceId: String) -> Int {
+        switch serviceId {
+        case "anthropic":
+            return 0
+        case "openai":
+            return 1
+        case "gemini":
+            return 2
+        default:
+            return 3
         }
     }
 }
@@ -155,7 +189,7 @@ private struct WidgetServiceQuotaRow: View {
                 CircularCountdownRing(
                     progress: countdownProgress,
                     color: quotaColor(for: snapshot.fiveHourRemaining),
-                    label: "5h",
+                    label: ringLabel,
                     labelFont: metrics.ringCenterFont
                 )
                     .frame(width: metrics.ringSize, height: metrics.ringSize)
@@ -179,8 +213,8 @@ private struct WidgetServiceQuotaRow: View {
                     .minimumScaleFactor(0.9)
                     .allowsTightening(true)
 
-                WidgetQuotaProgressLine(title: "5h", remainingFraction: snapshot.fiveHourRemaining, metrics: metrics)
-                WidgetQuotaProgressLine(title: "1w", remainingFraction: snapshot.weeklyRemaining, metrics: metrics)
+                WidgetQuotaProgressLine(title: shortQuotaTitle(snapshot.primaryQuotaTitle), remainingFraction: snapshot.fiveHourRemaining, metrics: metrics)
+                WidgetQuotaProgressLine(title: shortQuotaTitle(snapshot.secondaryQuotaTitle), remainingFraction: snapshot.weeklyRemaining, metrics: metrics)
             }
         }
         .padding(.horizontal, metrics.rowHorizontalPadding)
@@ -195,11 +229,22 @@ private struct WidgetServiceQuotaRow: View {
         snapshot.fiveHourRefillRemainingText
     }
 
+    private var ringLabel: String {
+        snapshot.id == "gemini" ? "1D" : snapshot.primaryRingTitle
+    }
+
     private func quotaColor(for remaining: Double) -> Color {
         let value = min(max(remaining, 0), 1)
         if value <= 0.10 { return .red }
         if value <= 0.30 { return .orange }
         return .green
+    }
+
+    private func shortQuotaTitle(_ title: String) -> String {
+        let lowered = title.lowercased()
+        if lowered.contains("gemini 3 flash") { return "G3F" }
+        if lowered.contains("gemini 3 pro") { return "G3P" }
+        return title
     }
 }
 
@@ -332,7 +377,7 @@ private struct WidgetLayoutMetrics {
 private enum WidgetLocalUsageOverlay {
     static func patch(_ snapshots: [ServiceSnapshot]) -> (snapshots: [ServiceSnapshot], debug: String) {
         var debug: [String] = []
-        let patched = snapshots.map { snapshot in
+        var patched = snapshots.map { snapshot in
             switch snapshot.id {
             case "anthropic":
                 if let info = readClaudeCache() {
@@ -352,41 +397,119 @@ private enum WidgetLocalUsageOverlay {
                 return snapshot
             }
         }
+
+        if let index = patched.firstIndex(where: { $0.id == "gemini" }) {
+            if let info = readGeminiCache() {
+                patched[index] = apply(info: info, to: patched[index])
+                debug.append("gemini:cache")
+            } else {
+                debug.append("gemini:none")
+            }
+        } else if let info = readGeminiCache() {
+            patched.append(makeGeminiSnapshot(from: info))
+            debug.append("gemini:add")
+        } else {
+            debug.append("gemini:none")
+        }
+
+        patched.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         return (patched, debug.joined(separator: ","))
     }
 
     private static func apply(info: LocalCacheInfo, to snapshot: ServiceSnapshot) -> ServiceSnapshot {
         let updatedAt = max(snapshot.updatedAt, info.updatedAt)
+        let fiveHourUtilization = info.fiveHourUtilization ?? snapshot.fiveHourUtilization
+        let weeklyUtilization = info.weeklyUtilization ?? snapshot.weeklyUtilization
+        let usageUsed = info.primaryUsagePercent ?? snapshot.usageUsed
+        let usageLimit = snapshot.usageLimit > 0 ? snapshot.usageLimit : (info.primaryUsagePercent != nil ? 100 : 0)
         return ServiceSnapshot(
             id: snapshot.id,
             name: snapshot.name,
-            usageUsed: snapshot.usageUsed,
-            usageLimit: snapshot.usageLimit,
+            usageUsed: usageUsed,
+            usageLimit: usageLimit,
             refillAt: info.fiveHourRefillAt ?? snapshot.refillAt,
             subscriptionState: snapshot.subscriptionState,
             updatedAt: updatedAt,
-            fiveHourUtilization: snapshot.fiveHourUtilization,
-            weeklyUtilization: snapshot.weeklyUtilization,
+            fiveHourUtilization: fiveHourUtilization,
+            weeklyUtilization: weeklyUtilization,
             fiveHourRefillAt: info.fiveHourRefillAt ?? snapshot.fiveHourRefillAt,
-            weeklyRefillAt: info.weeklyRefillAt ?? snapshot.weeklyRefillAt
+            weeklyRefillAt: info.weeklyRefillAt ?? snapshot.weeklyRefillAt,
+            primaryQuotaLabel: info.primaryQuotaLabel ?? snapshot.primaryQuotaLabel,
+            secondaryQuotaLabel: info.secondaryQuotaLabel ?? snapshot.secondaryQuotaLabel,
+            primaryRingLabel: info.primaryRingLabel ?? snapshot.primaryRingLabel
+        )
+    }
+
+    private static func makeGeminiSnapshot(from info: LocalCacheInfo) -> ServiceSnapshot {
+        let fallbackRefill = Calendar.current.date(byAdding: .hour, value: 24, to: info.updatedAt) ?? info.updatedAt
+        let fiveHourRefill = info.fiveHourRefillAt ?? fallbackRefill
+        let weeklyRefill = info.weeklyRefillAt ?? fallbackRefill
+        let utilization = max(
+            info.fiveHourUtilization ?? 0,
+            info.weeklyUtilization ?? 0
+        )
+
+        return ServiceSnapshot(
+            id: "gemini",
+            name: "Gemini CLI",
+            usageUsed: info.primaryUsagePercent ?? Int((utilization * 100).rounded()),
+            usageLimit: 100,
+            refillAt: fiveHourRefill,
+            subscriptionState: utilization >= 0.95 ? .paused : .active,
+            updatedAt: info.updatedAt,
+            fiveHourUtilization: info.fiveHourUtilization,
+            weeklyUtilization: info.weeklyUtilization,
+            fiveHourRefillAt: fiveHourRefill,
+            weeklyRefillAt: weeklyRefill,
+            primaryQuotaLabel: info.primaryQuotaLabel ?? "Gemini 3 Flash",
+            secondaryQuotaLabel: info.secondaryQuotaLabel ?? "Gemini 3 Pro",
+            primaryRingLabel: info.primaryRingLabel ?? "G3F"
         )
     }
 
     private static func readClaudeCache() -> LocalCacheInfo? {
-        let path = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
-            .appendingPathComponent(".claude/plugins/oh-my-claudecode/.usage-cache.json")
-        return readCache(at: path, maxAgeMs: 300_000)
+        readCache(for: .claude, relativePath: "plugins/oh-my-claudecode/.usage-cache.json", maxAgeMs: 300_000)
     }
 
     private static func readCodexCache() -> LocalCacheInfo? {
-        let path = URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
-            .appendingPathComponent(".codex/.usage-cache.json")
-        return readCache(at: path, maxAgeMs: 1_800_000)
+        readCache(for: .codex, relativePath: ".usage-cache.json", maxAgeMs: 1_800_000)
+    }
+
+    private static func readGeminiCache() -> LocalCacheInfo? {
+        let fallbackURL = SharedFallbackPath.url(fileName: "gemini-usage-cache.json")
+        if let info = readCache(at: fallbackURL, maxAgeMs: 1_800_000) {
+            return info
+        }
+        return readCache(for: .gemini, relativePath: ".usage-cache.json", maxAgeMs: 1_800_000)
+    }
+
+    private static func readCache(
+        for source: LocalDataSource,
+        relativePath: String,
+        maxAgeMs: Double
+    ) -> LocalCacheInfo? {
+        if let data = ExternalDataAccess.shared.withDirectoryAccess(for: source, { sourceDir in
+            let path = appendRelativePath(relativePath, to: sourceDir)
+            return try? Data(contentsOf: path)
+        }), let info = parseCache(data: data, maxAgeMs: maxAgeMs) {
+            return info
+        }
+
+        let directPath = appendRelativePath(
+            relativePath,
+            to: URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
+                .appendingPathComponent(source.expectedDirectoryName, isDirectory: true)
+        )
+        return readCache(at: directPath, maxAgeMs: maxAgeMs)
     }
 
     private static func readCache(at url: URL, maxAgeMs: Double) -> LocalCacheInfo? {
-        guard let data = try? Data(contentsOf: url),
-              let cache = try? JSONDecoder().decode(LocalUsageCache.self, from: data),
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return parseCache(data: data, maxAgeMs: maxAgeMs)
+    }
+
+    private static func parseCache(data: Data, maxAgeMs: Double) -> LocalCacheInfo? {
+        guard let cache = try? JSONDecoder().decode(LocalUsageCache.self, from: data),
               cache.error != true,
               let usage = cache.data else { return nil }
 
@@ -395,9 +518,27 @@ private enum WidgetLocalUsageOverlay {
 
         return LocalCacheInfo(
             updatedAt: Date(timeIntervalSince1970: cache.timestamp / 1000),
+            fiveHourUtilization: percentToFraction(usage.fiveHourPercent),
+            weeklyUtilization: percentToFraction(usage.weeklyPercent),
             fiveHourRefillAt: parseISO8601(usage.fiveHourResetsAt),
-            weeklyRefillAt: parseISO8601(usage.weeklyResetsAt)
+            weeklyRefillAt: parseISO8601(usage.weeklyResetsAt),
+            primaryQuotaLabel: usage.primaryQuotaLabel,
+            secondaryQuotaLabel: usage.secondaryQuotaLabel,
+            primaryRingLabel: usage.primaryRingLabel
         )
+    }
+
+    private static func appendRelativePath(_ relativePath: String, to base: URL) -> URL {
+        relativePath
+            .split(separator: "/")
+            .reduce(base) { partial, component in
+                partial.appendingPathComponent(String(component))
+            }
+    }
+
+    private static func percentToFraction(_ percent: Int?) -> Double? {
+        guard let percent else { return nil }
+        return min(max(Double(percent) / 100, 0), 1)
     }
 
     private static func parseISO8601(_ raw: String?) -> Date? {
@@ -423,8 +564,21 @@ private enum WidgetLocalUsageOverlay {
 
 private struct LocalCacheInfo {
     let updatedAt: Date
+    let fiveHourUtilization: Double?
+    let weeklyUtilization: Double?
     let fiveHourRefillAt: Date?
     let weeklyRefillAt: Date?
+    let primaryQuotaLabel: String?
+    let secondaryQuotaLabel: String?
+    let primaryRingLabel: String?
+
+    var primaryUsagePercent: Int? {
+        let maxUsage = max(fiveHourUtilization ?? 0, weeklyUtilization ?? 0)
+        if maxUsage <= 0 {
+            return nil
+        }
+        return Int((maxUsage * 100).rounded())
+    }
 }
 
 private struct LocalUsageCache: Decodable {
@@ -433,12 +587,22 @@ private struct LocalUsageCache: Decodable {
     let error: Bool?
 
     struct Usage: Decodable {
+        let fiveHourPercent: Int?
+        let weeklyPercent: Int?
         let fiveHourResetsAt: String?
         let weeklyResetsAt: String?
+        let primaryQuotaLabel: String?
+        let secondaryQuotaLabel: String?
+        let primaryRingLabel: String?
 
         enum CodingKeys: String, CodingKey {
+            case fiveHourPercent = "fiveHourPercent"
+            case weeklyPercent = "weeklyPercent"
             case fiveHourResetsAt = "fiveHourResetsAt"
             case weeklyResetsAt = "weeklyResetsAt"
+            case primaryQuotaLabel = "primaryQuotaLabel"
+            case secondaryQuotaLabel = "secondaryQuotaLabel"
+            case primaryRingLabel = "primaryRingLabel"
         }
     }
 }

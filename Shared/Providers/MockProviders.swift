@@ -24,7 +24,10 @@ struct MockServiceProvider: ServiceProvider {
             fiveHourUtilization: nil,
             weeklyUtilization: nil,
             fiveHourRefillAt: nil,
-            weeklyRefillAt: nil
+            weeklyRefillAt: nil,
+            primaryQuotaLabel: nil,
+            secondaryQuotaLabel: nil,
+            primaryRingLabel: nil
         )
     }
 }

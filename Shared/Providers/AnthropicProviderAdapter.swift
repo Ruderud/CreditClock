@@ -79,7 +79,10 @@ struct AnthropicProviderAdapter: ServiceProvider {
             fiveHourUtilization: Double(fiveHour) / 100,
             weeklyUtilization: Double(weekly) / 100,
             fiveHourRefillAt: fiveHourReset,
-            weeklyRefillAt: weeklyReset
+            weeklyRefillAt: weeklyReset,
+            primaryQuotaLabel: nil,
+            secondaryQuotaLabel: nil,
+            primaryRingLabel: nil
         )
     }
 
@@ -129,7 +132,10 @@ struct AnthropicProviderAdapter: ServiceProvider {
             fiveHourUtilization: Double(fiveHour) / 100,
             weeklyUtilization: Double(weekly) / 100,
             fiveHourRefillAt: resetDate,
-            weeklyRefillAt: weeklyReset
+            weeklyRefillAt: weeklyReset,
+            primaryQuotaLabel: nil,
+            secondaryQuotaLabel: nil,
+            primaryRingLabel: nil
         )
     }
 

@@ -49,6 +49,7 @@ targets:
         com.apple.security.temporary-exception.files.home-relative-path.read-only:
           - .claude/
           - .codex/
+          - .gemini/
         com.apple.security.temporary-exception.files.home-relative-path.read-write:
           - .creditclock/
           - Library/Containers/com.creditclock.app.widget/
@@ -84,5 +85,6 @@ targets:
         com.apple.security.temporary-exception.files.home-relative-path.read-only:
           - .claude/
           - .codex/
+          - .gemini/
           - .creditclock/
           - Library/Group Containers/group.com.creditclock.shared/

@@ -102,13 +102,13 @@ private struct ServiceRow: View {
             }
 
             QuotaProgressLine(
-                title: "5h",
+                title: snapshot.primaryQuotaTitle,
                 remainingFraction: snapshot.fiveHourRemaining,
                 remainingTimeText: snapshot.fiveHourRefillRemainingText
             )
 
             QuotaProgressLine(
-                title: "1w",
+                title: snapshot.secondaryQuotaTitle,
                 remainingFraction: snapshot.weeklyRemaining,
                 remainingTimeText: snapshot.weeklyRefillRemainingText
             )

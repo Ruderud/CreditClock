@@ -125,14 +125,16 @@ final class ServiceStore: ObservableObject {
             guard provider != .anthropic, provider != .openai else { continue }
             let ref = "com.creditclock.\(provider.rawValue).credential"
             let hasKey = (try? credentialStore.load(key: ref))?.isEmpty == false
+            let isConnected = connections.isConnected(provider)
 
-            if hasKey && connections.isConnected(provider) {
-                switch provider {
-                case .gemini:
+            switch provider {
+            case .gemini:
+                let hasLocalOAuth = GeminiProviderAdapter.hasLocalCLIOAuthCredentials()
+                if hasLocalOAuth || (isConnected && hasKey) {
                     result.append(GeminiProviderAdapter(credentialStore: credentialStore))
-                case .openai, .anthropic:
-                    break
                 }
+            case .openai, .anthropic:
+                break
             }
         }
 

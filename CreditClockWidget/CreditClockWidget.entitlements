@@ -12,6 +12,7 @@
     <array>
         <string>.claude/</string>
         <string>.codex/</string>
+        <string>.gemini/</string>
         <string>.creditclock/</string>
         <string>Library/Group Containers/group.com.creditclock.shared/</string>
     </array>
