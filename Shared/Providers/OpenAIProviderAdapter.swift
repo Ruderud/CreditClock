@@ -41,6 +41,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
         let fiveH = usage.fiveHourPercent
         let weekly = usage.weeklyPercent
         let primaryPercent = max(fiveH, weekly)
+        let subscriptionDetail = readPlanDetailFromAuth()
 
         let fiveHourReset: Date
         if let d = parseISO8601Date(usage.fiveHourResetsAt) {
@@ -57,6 +58,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
             usageLimit: 100,
             refillAt: fiveHourReset,
             subscriptionState: primaryPercent >= 90 ? .paused : .active,
+            subscriptionDetail: subscriptionDetail,
             updatedAt: Date(),
             fiveHourUtilization: Double(fiveH) / 100,
             weeklyUtilization: Double(weekly) / 100,
@@ -145,6 +147,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
             let fiveH = Int(primaryPct)
             let weekly = Int(secondaryPct)
             let primaryPercent = max(fiveH, weekly)
+            let subscriptionDetail = readPlanDetailFromAuth()
             let fiveHourReset = Date(timeIntervalSince1970: primaryResets)
             let weeklyReset = secondaryResets > 0
                 ? Date(timeIntervalSince1970: secondaryResets)
@@ -157,6 +160,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
                 usageLimit: 100,
                 refillAt: fiveHourReset,
                 subscriptionState: primaryPercent >= 90 ? .paused : .active,
+                subscriptionDetail: subscriptionDetail,
                 updatedAt: Date(),
                 fiveHourUtilization: Double(fiveH) / 100,
                 weeklyUtilization: Double(weekly) / 100,
@@ -211,7 +215,8 @@ struct OpenAIProviderAdapter: ServiceProvider {
               let claims = decodeJWTPayload(idToken) else { return nil }
 
         let authInfo = claims["https://api.openai.com/auth"] as? [String: Any]
-        let planType = authInfo?["chatgpt_plan_type"] as? String ?? "unknown"
+        let planType = authInfo?["chatgpt_plan_type"] as? String
+        let subscriptionDetail = normalizedPlanDetail(planType)
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withTimeZone]
@@ -224,11 +229,12 @@ struct OpenAIProviderAdapter: ServiceProvider {
 
         return ServiceSnapshot(
             id: serviceId,
-            name: "Codex \(planType.capitalized) — \(remainingDays)d left",
+            name: "Codex — \(remainingDays)d left",
             usageUsed: 0,
             usageLimit: 100,
             refillAt: activeUntil,
             subscriptionState: now > activeUntil ? .expired : .active,
+            subscriptionDetail: subscriptionDetail,
             updatedAt: now,
             fiveHourUtilization: nil,
             weeklyUtilization: nil,
@@ -255,6 +261,51 @@ struct OpenAIProviderAdapter: ServiceProvider {
         guard let data = Data(base64Encoded: base64),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return json
+    }
+
+    private func readPlanDetailFromAuth() -> String? {
+        guard let data = ExternalDataAccess.shared.withDirectoryAccess(for: .codex, { codexDir in
+            let authURL = codexDir.appendingPathComponent("auth.json")
+            return try? Data(contentsOf: authURL)
+        }) else { return nil }
+
+        guard let auth = try? JSONDecoder().decode(CodexAuth.self, from: data),
+              let idToken = auth.tokens?.idToken,
+              let claims = decodeJWTPayload(idToken),
+              let authInfo = claims["https://api.openai.com/auth"] as? [String: Any] else { return nil }
+
+        let rawPlanType = authInfo["chatgpt_plan_type"] as? String
+        return normalizedPlanDetail(rawPlanType)
+    }
+
+    private func normalizedPlanDetail(_ rawPlan: String?) -> String? {
+        guard var rawPlan, !rawPlan.isEmpty else { return nil }
+        rawPlan = rawPlan
+            .replacingOccurrences(of: "chatgpt_", with: "")
+            .replacingOccurrences(of: "-", with: "_")
+            .lowercased()
+
+        switch rawPlan {
+        case "plus":
+            return "Plus"
+        case "pro":
+            return "Pro"
+        case "team":
+            return "Team"
+        case "enterprise":
+            return "Enterprise"
+        case "free":
+            return "Free"
+        case "unknown":
+            return nil
+        default:
+            return rawPlan
+                .split(separator: "_")
+                .map { token in
+                    token.prefix(1).uppercased() + String(token.dropFirst())
+                }
+                .joined(separator: " ")
+        }
     }
 
     private func parseISO8601Date(_ value: String?) -> Date? {

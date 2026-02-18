@@ -30,15 +30,22 @@ targets:
     sources:
       - path: CreditClockApp
       - path: Shared
+    info:
+      path: CreditClockApp/Info.plist
+      properties:
+        CFBundleDisplayName: CreditClock
+        LSApplicationCategoryType: public.app-category.productivity
+        LSUIElement: true
+        NSAppleEventsUsageDescription: CreditClock needs permission to open Terminal and run Claude CLI login.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.creditclock.app
+            CFBundleURLSchemes:
+              - creditclock
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.creditclock.app
       PRODUCT_NAME: CreditClock
       SWIFT_VERSION: 5.10
-      GENERATE_INFOPLIST_FILE: YES
-      INFOPLIST_KEY_CFBundleDisplayName: CreditClock
-      INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
-      INFOPLIST_KEY_LSUIElement: YES
-      INFOPLIST_KEY_NSAppleEventsUsageDescription: CreditClock needs permission to open Terminal and run Claude CLI login.
+      GENERATE_INFOPLIST_FILE: NO
       CODE_SIGN_STYLE: Automatic
     entitlements:
       path: CreditClockApp/CreditClock.entitlements

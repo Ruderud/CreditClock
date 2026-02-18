@@ -4,6 +4,7 @@ import SwiftUI
 struct MenuBarView: View {
     @ObservedObject var store: ServiceStore
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @State private var launchAtLoginEnabled = false
     @State private var launchAtLoginError: String?
 
@@ -53,6 +54,14 @@ struct MenuBarView: View {
             Divider()
 
             Button {
+                openDashboard()
+            } label: {
+                Label("앱 켜기", systemImage: "macwindow")
+            }
+
+            Divider()
+
+            Button {
                 openSettingsWithAppActivation()
             } label: {
                 Label("Settings", systemImage: "gearshape")
@@ -71,6 +80,11 @@ struct MenuBarView: View {
     private func openSettingsWithAppActivation() {
         NSApplication.shared.activate(ignoringOtherApps: true)
         openSettings()
+    }
+
+    private func openDashboard() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        openWindow(id: AppDeepLink.dashboardWindowID)
     }
 
     private func statusColor(for state: SubscriptionState) -> Color {

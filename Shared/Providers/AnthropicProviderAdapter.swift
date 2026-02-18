@@ -35,6 +35,31 @@ struct AnthropicProviderAdapter: ServiceProvider {
             let weeklyPercent: Int?
             let fiveHourResetsAt: String?
             let weeklyResetsAt: String?
+            let subscriptionType: String?
+            let rateLimitTier: String?
+
+            enum CodingKeys: String, CodingKey {
+                case fiveHourPercent
+                case weeklyPercent
+                case fiveHourResetsAt
+                case weeklyResetsAt
+                case subscriptionType
+                case rateLimitTier
+                case subscriptionTypeSnake = "subscription_type"
+                case rateLimitTierSnake = "rate_limit_tier"
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                fiveHourPercent = try container.decodeIfPresent(Int.self, forKey: .fiveHourPercent)
+                weeklyPercent = try container.decodeIfPresent(Int.self, forKey: .weeklyPercent)
+                fiveHourResetsAt = try container.decodeIfPresent(String.self, forKey: .fiveHourResetsAt)
+                weeklyResetsAt = try container.decodeIfPresent(String.self, forKey: .weeklyResetsAt)
+                subscriptionType = try container.decodeIfPresent(String.self, forKey: .subscriptionType)
+                    ?? (try container.decodeIfPresent(String.self, forKey: .subscriptionTypeSnake))
+                rateLimitTier = try container.decodeIfPresent(String.self, forKey: .rateLimitTier)
+                    ?? (try container.decodeIfPresent(String.self, forKey: .rateLimitTierSnake))
+            }
         }
 
         guard let cache = try? JSONDecoder().decode(OMCCache.self, from: data),
@@ -63,6 +88,10 @@ struct AnthropicProviderAdapter: ServiceProvider {
 
         // Use the higher utilization as primary display
         let primaryPercent = max(fiveHour, weekly)
+        let subscriptionDetail = normalizedPlanDetail(
+            subscriptionType: usage.subscriptionType,
+            rateLimitTier: usage.rateLimitTier
+        ) ?? readCachedPlanDetailFromCredentials()
 
         return ServiceSnapshot(
             id: serviceId,
@@ -71,6 +100,7 @@ struct AnthropicProviderAdapter: ServiceProvider {
             usageLimit: 100,
             refillAt: fiveHourReset,
             subscriptionState: primaryPercent >= 90 ? .paused : .active,
+            subscriptionDetail: subscriptionDetail,
             updatedAt: Date(),
             fiveHourUtilization: Double(fiveHour) / 100,
             weeklyUtilization: Double(weekly) / 100,
@@ -95,7 +125,7 @@ struct AnthropicProviderAdapter: ServiceProvider {
 
         do {
             let decoded = try await requestOAuthUsage(accessToken: accessToken)
-            return makeSnapshot(from: decoded)
+            return makeSnapshot(from: decoded, credentials: credentials)
         } catch ProviderError.httpError(let code, _) where code == 401 {
             // Token can be revoked/expired before local expiresAt. Refresh once and retry.
             guard let refreshToken = credentials.refreshToken,
@@ -108,17 +138,22 @@ struct AnthropicProviderAdapter: ServiceProvider {
             writeClaudeCodeOAuthCredentials(credentials)
 
             let decoded = try await requestOAuthUsage(accessToken: credentials.accessToken)
-            return makeSnapshot(from: decoded)
+            return makeSnapshot(from: decoded, credentials: credentials)
         }
     }
 
-    private func makeSnapshot(from decoded: OAuthUsageResponse) -> ServiceSnapshot {
+    private func makeSnapshot(from decoded: OAuthUsageResponse, credentials: ClaudeOAuthCredentials) -> ServiceSnapshot {
         let fiveHour = Int(decoded.fiveHour?.utilization ?? 0)
         let weekly = Int(decoded.sevenDay?.utilization ?? 0)
 
         let resetDate = parseISO8601Date(decoded.fiveHour?.resetsAt) ?? Date().addingTimeInterval(3600)
         let weeklyReset = parseISO8601Date(decoded.sevenDay?.resetsAt) ?? Date().addingTimeInterval(7 * 24 * 3600)
         let primaryPercent = max(fiveHour, weekly)
+        let subscriptionDetail = normalizedPlanDetail(
+            subscriptionType: decoded.subscriptionType ?? credentials.subscriptionType,
+            rateLimitTier: decoded.rateLimitTier ?? credentials.rateLimitTier
+        )
+        cachePlanDetail(subscriptionDetail)
 
         return ServiceSnapshot(
             id: serviceId,
@@ -127,6 +162,7 @@ struct AnthropicProviderAdapter: ServiceProvider {
             usageLimit: 100,
             refillAt: resetDate,
             subscriptionState: primaryPercent >= 90 ? .paused : .active,
+            subscriptionDetail: subscriptionDetail,
             updatedAt: Date(),
             fiveHourUtilization: Double(fiveHour) / 100,
             weeklyUtilization: Double(weekly) / 100,
@@ -198,11 +234,15 @@ struct AnthropicProviderAdapter: ServiceProvider {
         let expiresAtMs = numericValue(in: oauth, keys: ["expiresAt", "expires_at"]).map { value in
             value > 10_000_000_000 ? value : value * 1000
         }
+        let subscriptionType = stringValue(in: oauth, keys: ["subscriptionType", "subscription_type"])
+        let rateLimitTier = stringValue(in: oauth, keys: ["rateLimitTier", "rate_limit_tier"])
 
         return ClaudeOAuthCredentials(
             accessToken: accessToken,
             refreshToken: refreshToken,
             expiresAtMs: expiresAtMs,
+            subscriptionType: subscriptionType,
+            rateLimitTier: rateLimitTier,
             source: source
         )
     }
@@ -356,6 +396,50 @@ struct AnthropicProviderAdapter: ServiceProvider {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
+    private func normalizedPlanDetail(subscriptionType: String?, rateLimitTier: String?) -> String? {
+        if let normalized = normalizeTierToken(subscriptionType) {
+            return normalized
+        }
+        if let normalized = normalizeTierToken(rateLimitTier) {
+            return normalized
+        }
+        return nil
+    }
+
+    private func normalizeTierToken(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let lowered = raw.lowercased()
+        if lowered.contains("max") {
+            return "Max"
+        }
+        if lowered.contains("pro") {
+            return "Pro"
+        }
+        if lowered.contains("free") {
+            return "Free"
+        }
+        return nil
+    }
+
+    private func readCachedPlanDetailFromCredentials() -> String? {
+        if Self.planDetailResolved {
+            return Self.cachedPlanDetail
+        }
+
+        let detail = readClaudeCodeOAuthCredentials().flatMap {
+            normalizedPlanDetail(subscriptionType: $0.subscriptionType, rateLimitTier: $0.rateLimitTier)
+        }
+        Self.cachedPlanDetail = detail
+        Self.planDetailResolved = true
+        return detail
+    }
+
+    private func cachePlanDetail(_ detail: String?) {
+        guard let detail, !detail.isEmpty else { return }
+        Self.cachedPlanDetail = detail
+        Self.planDetailResolved = true
+    }
+
     private func parseISO8601Date(_ value: String?) -> Date? {
         guard let value else { return nil }
         if let parsed = Self.iso8601WithFractional.date(from: value) {
@@ -377,6 +461,8 @@ struct AnthropicProviderAdapter: ServiceProvider {
     }()
 
     private static let defaultOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    private static var cachedPlanDetail: String?
+    private static var planDetailResolved = false
 }
 
 // MARK: - OAuth API Response
@@ -384,6 +470,8 @@ struct AnthropicProviderAdapter: ServiceProvider {
 private struct OAuthUsageResponse: Decodable {
     let fiveHour: Window?
     let sevenDay: Window?
+    let subscriptionType: String?
+    let rateLimitTier: String?
 
     struct Window: Decodable {
         let utilization: Double?
@@ -398,6 +486,8 @@ private struct OAuthUsageResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
+        case subscriptionType = "subscription_type"
+        case rateLimitTier = "rate_limit_tier"
     }
 }
 
@@ -430,5 +520,7 @@ private struct ClaudeOAuthCredentials {
     var accessToken: String
     var refreshToken: String?
     var expiresAtMs: Double?
+    var subscriptionType: String?
+    var rateLimitTier: String?
     let source: OAuthCredentialSource
 }

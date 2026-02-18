@@ -93,7 +93,7 @@ private struct ServiceRow: View {
                 Text(snapshot.displayName)
                     .font(.headline)
                 Spacer()
-                Text(snapshot.subscriptionState.title)
+                Text(snapshot.subscriptionBadgeTitle)
                     .font(.caption)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)

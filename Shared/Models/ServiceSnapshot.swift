@@ -23,6 +23,7 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
     let usageLimit: Int
     let refillAt: Date
     let subscriptionState: SubscriptionState
+    let subscriptionDetail: String?
     let updatedAt: Date
     let fiveHourUtilization: Double?
     let weeklyUtilization: Double?
@@ -43,6 +44,14 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
 
     var displayName: String {
         name.components(separatedBy: " — ").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? name
+    }
+
+    var subscriptionBadgeTitle: String {
+        guard let detail = subscriptionDetail?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !detail.isEmpty else {
+            return subscriptionState.title
+        }
+        return "\(subscriptionState.title) · \(detail)"
     }
 
     var fiveHourUsage: Double {
@@ -234,6 +243,7 @@ extension ServiceSnapshot {
                 usageLimit: 100,
                 refillAt: Calendar.current.date(byAdding: .hour, value: 14, to: Date()) ?? Date(),
                 subscriptionState: .active,
+                subscriptionDetail: "Plus",
                 updatedAt: Date(),
                 fiveHourUtilization: 0.84,
                 weeklyUtilization: 0.57,
@@ -250,6 +260,7 @@ extension ServiceSnapshot {
                 usageLimit: 50,
                 refillAt: Calendar.current.date(byAdding: .day, value: 2, to: Date()) ?? Date(),
                 subscriptionState: .active,
+                subscriptionDetail: "Max",
                 updatedAt: Date(),
                 fiveHourUtilization: 0.05,
                 weeklyUtilization: 0.57,
@@ -266,6 +277,7 @@ extension ServiceSnapshot {
                 usageLimit: 30,
                 refillAt: Calendar.current.date(byAdding: .hour, value: 8, to: Date()) ?? Date(),
                 subscriptionState: .trial,
+                subscriptionDetail: nil,
                 updatedAt: Date(),
                 fiveHourUtilization: nil,
                 weeklyUtilization: nil,

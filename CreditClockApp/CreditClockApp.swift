@@ -20,6 +20,12 @@ struct CreditClockApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        Window("CreditClock", id: AppDeepLink.dashboardWindowID) {
+            ContentView(store: store)
+                .frame(minWidth: 420, minHeight: 520)
+        }
+        .handlesExternalEvents(matching: [AppDeepLink.dashboardHost])
+
         Settings {
             NavigationStack {
                 ProviderSettingsView(store: store)

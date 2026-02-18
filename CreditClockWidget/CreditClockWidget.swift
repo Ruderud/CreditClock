@@ -126,6 +126,7 @@ struct CreditClockWidgetView: View {
         .containerBackground(for: .widget) {
             Color.secondary.opacity(0.1)
         }
+        .widgetURL(AppDeepLink.dashboardURL)
     }
 
     private var maxRows: Int {
@@ -460,6 +461,7 @@ private enum WidgetLocalUsageOverlay {
             usageLimit: usageLimit,
             refillAt: info.fiveHourRefillAt ?? snapshot.refillAt,
             subscriptionState: snapshot.subscriptionState,
+            subscriptionDetail: snapshot.subscriptionDetail,
             updatedAt: updatedAt,
             fiveHourUtilization: fiveHourUtilization,
             weeklyUtilization: weeklyUtilization,
@@ -487,6 +489,7 @@ private enum WidgetLocalUsageOverlay {
             usageLimit: 100,
             refillAt: fiveHourRefill,
             subscriptionState: utilization >= 0.95 ? .paused : .active,
+            subscriptionDetail: nil,
             updatedAt: info.updatedAt,
             fiveHourUtilization: info.fiveHourUtilization,
             weeklyUtilization: info.weeklyUtilization,
