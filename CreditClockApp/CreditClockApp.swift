@@ -4,7 +4,6 @@ import WidgetKit
 @main
 struct CreditClockApp: App {
     @StateObject private var store = ServiceStore()
-    @State private var scheduler: PollingScheduler?
 
     var body: some Scene {
         WindowGroup {
@@ -12,14 +11,12 @@ struct CreditClockApp: App {
                 .frame(minWidth: 620, minHeight: 480)
                 .task {
                     await store.refresh()
-                    startPollingIfNeeded()
+                    store.reconcilePolling()
                 }
                 .onChange(of: store.hasConfiguredProviders) { _, hasProviders in
                     if hasProviders {
-                        startPollingIfNeeded()
-                    } else if scheduler != nil {
-                        scheduler?.stop()
-                        scheduler = nil
+                        store.reconcilePolling()
+                    } else {
                         WidgetCenter.shared.reloadAllTimelines()
                     }
                 }
@@ -29,14 +26,5 @@ struct CreditClockApp: App {
             MenuBarView(store: store)
         }
         .menuBarExtraStyle(.window)
-    }
-
-    private func startPollingIfNeeded() {
-        guard scheduler == nil, store.hasConfiguredProviders else { return }
-        let s = PollingScheduler { [store] in
-            await store.refreshReturningSuccess()
-        }
-        scheduler = s
-        s.start()
     }
 }

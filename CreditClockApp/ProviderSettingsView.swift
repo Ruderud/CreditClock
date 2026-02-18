@@ -1,7 +1,9 @@
 import AppKit
+import Security
 import SwiftUI
 
 struct ProviderSettingsView: View {
+    @ObservedObject var store: ServiceStore
     @State private var accounts: [ProviderAccount] = ProviderId.allCases.map {
         ProviderAccount.defaultAccount(for: $0)
     }
@@ -10,6 +12,9 @@ struct ProviderSettingsView: View {
     @State private var localAccessState: [LocalDataSource: Bool] = [:]
     @State private var connectionState: [ProviderId: Bool] = [:]
     @State private var localAccessMessage: String?
+    @State private var expandedLogs: Set<ProviderId> = []
+    @State private var claudeAuthInProgress = false
+    @State private var claudeAuthMessage: String?
 
     private let credentialStore: CredentialStore = KeychainCredentialStore()
     private let connectionStore = ProviderConnectionStore()
@@ -122,6 +127,33 @@ struct ProviderSettingsView: View {
                 .foregroundStyle(result.success ? .green : .red)
                 .font(.caption)
         }
+
+        if provider == .anthropic {
+            HStack {
+                Button("Auth Status") {
+                    Task { await runClaudeAuthStatus() }
+                }
+                .disabled(claudeAuthInProgress)
+
+                Button("Re-login Claude") {
+                    Task { await reloginClaudeInApp() }
+                }
+                .disabled(claudeAuthInProgress)
+
+                if claudeAuthInProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if let claudeAuthMessage {
+                Text(claudeAuthMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        providerLogSection(for: provider)
     }
 
     @ViewBuilder
@@ -160,6 +192,8 @@ struct ProviderSettingsView: View {
                 .foregroundStyle(result.success ? .green : .red)
                 .font(.caption)
         }
+
+        providerLogSection(for: account.wrappedValue.provider)
     }
 
     private func binding(for id: String) -> Binding<String> {
@@ -343,11 +377,349 @@ struct ProviderSettingsView: View {
         connectionState[provider] = false
         testResults[provider.rawValue] = TestResult(success: true, message: "Disconnected")
     }
+
+    private func runClaudeAuthStatus() async {
+        claudeAuthInProgress = true
+        defer { claudeAuthInProgress = false }
+
+        let local = readClaudeLocalOAuthStatus()
+
+        do {
+            _ = try await AnthropicProviderAdapter().fetchSnapshot()
+            claudeAuthMessage = summarizeClaudeAuthStatus(localStatus: local, fetchError: nil)
+        } catch {
+            claudeAuthMessage = summarizeClaudeAuthStatus(localStatus: local, fetchError: error)
+        }
+    }
+
+    private func reloginClaudeInApp() async {
+        claudeAuthInProgress = true
+        claudeAuthMessage = "Opening Terminal for Claude login..."
+        let result = await launchClaudeAuthInTerminal()
+        claudeAuthInProgress = false
+        switch result {
+        case .opened:
+            claudeAuthMessage = "Terminal에서 `claude auth login`을 실행했습니다. 브라우저 로그인 후 돌아와 `Auth Status` 또는 `Test`를 눌러주세요."
+        case .permissionDenied:
+            let copied = copyClaudeLoginCommandToPasteboard()
+            _ = openTerminalApp()
+            if copied {
+                claudeAuthMessage = "Terminal 자동 제어 권한이 거부되었습니다. macOS 설정에서 CreditClock -> Terminal 자동화를 허용해주세요. `claude auth login` 명령어를 클립보드에 복사했습니다."
+            } else {
+                claudeAuthMessage = "Terminal 자동 제어 권한이 거부되었습니다. macOS 설정에서 CreditClock -> Terminal 자동화를 허용한 뒤 다시 시도하거나, Terminal에서 `claude auth login`을 직접 실행해주세요."
+            }
+        case .scriptCreationFailed:
+            let copied = copyClaudeLoginCommandToPasteboard()
+            _ = openTerminalApp()
+            claudeAuthMessage = copied
+                ? "자동 실행 스크립트 생성에 실패했습니다. Terminal을 열었고 `claude auth login` 명령어를 클립보드에 복사했습니다."
+                : "자동 실행 스크립트 생성에 실패했습니다. Terminal에서 `claude auth login`을 직접 실행해주세요."
+        case .scriptError(let code, let message):
+            let copied = copyClaudeLoginCommandToPasteboard()
+            _ = openTerminalApp()
+            claudeAuthMessage = copied
+                ? "자동 실행 실패(code \(code)): \(message). Terminal을 열었고 `claude auth login` 명령어를 클립보드에 복사했습니다."
+                : "자동 실행 실패(code \(code)): \(message). Terminal에서 `claude auth login`을 직접 실행해주세요."
+        }
+    }
+
+    private func launchClaudeAuthInTerminal() async -> TerminalLaunchResult {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                let home = realHomeDirectory()
+                let command = """
+                export HOME="\(home)";
+                export PATH="\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH";
+                clear;
+                echo "Running: claude auth login";
+                if command -v claude >/dev/null 2>&1; then
+                  claude auth login;
+                else
+                  echo "claude CLI not found in PATH.";
+                  echo "Install Claude CLI or check your PATH.";
+                fi
+                """
+
+                let escaped = command
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                    .replacingOccurrences(of: "\n", with: "\\n")
+
+                let source = """
+                tell application "Terminal"
+                    activate
+                    do script "\(escaped)"
+                end tell
+                """
+
+                var error: NSDictionary?
+                guard let script = NSAppleScript(source: source) else {
+                    continuation.resume(returning: .scriptCreationFailed)
+                    return
+                }
+
+                _ = script.executeAndReturnError(&error)
+                guard let error else {
+                    continuation.resume(returning: .opened)
+                    return
+                }
+
+                let code = error[NSAppleScript.errorNumber] as? Int ?? -1
+                let message = (error[NSAppleScript.errorMessage] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? "unknown AppleScript error"
+
+                if code == -1743 {
+                    continuation.resume(returning: .permissionDenied)
+                    return
+                }
+
+                continuation.resume(returning: .scriptError(code: code, message: message))
+            }
+        }
+    }
+
+    @discardableResult
+    private func copyClaudeLoginCommandToPasteboard() -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.setString("claude auth login", forType: .string)
+    }
+
+    @discardableResult
+    private func openTerminalApp() -> Bool {
+        let appURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        if FileManager.default.fileExists(atPath: appURL.path) {
+            return NSWorkspace.shared.open(appURL)
+        }
+        return false
+    }
+
+    private func summarizeClaudeAuthStatus(localStatus: ClaudeLocalOAuthStatus, fetchError: Error?) -> String {
+        let sourceLabel: String = {
+            switch localStatus.source {
+            case .keychain: return "keychain"
+            case .file: return ".claude/.credentials.json"
+            case .none: return "none"
+            }
+        }()
+
+        if fetchError == nil {
+            var parts = ["Claude OAuth usable (direct API fetch succeeded)."]
+            if localStatus.source != .none {
+                parts.append("local source: \(sourceLabel)")
+                if let expiresAt = localStatus.expiresAt {
+                    parts.append("expires: \(dateText(expiresAt))")
+                }
+            } else {
+                parts.append("local token source not found (may still be available via keychain prompt/session).")
+            }
+            return parts.joined(separator: " ")
+        }
+
+        if localStatus.source == .none {
+            return "Claude local OAuth credentials not found. Terminal에서 `claude auth login` 실행 후 다시 `Auth Status` 또는 `Test`를 눌러주세요."
+        }
+
+        var parts = [
+            "Claude local OAuth found (\(sourceLabel)) but fetch failed:",
+            fetchError?.localizedDescription ?? "unknown error"
+        ]
+        if let expiresAt = localStatus.expiresAt {
+            parts.append("(expires \(dateText(expiresAt))).")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private func readClaudeLocalOAuthStatus() -> ClaudeLocalOAuthStatus {
+        if let keychainData = readClaudeCredentialsDataFromKeychain(),
+           let parsed = parseClaudeLocalOAuthStatus(from: keychainData, source: .keychain) {
+            return parsed
+        }
+
+        if let fileData = ExternalDataAccess.shared.withDirectoryAccess(for: .claude, { claudeDir in
+            let credsURL = claudeDir.appendingPathComponent(".credentials.json")
+            return try? Data(contentsOf: credsURL)
+        }),
+           let parsed = parseClaudeLocalOAuthStatus(from: fileData, source: .file) {
+            return parsed
+        }
+
+        return ClaudeLocalOAuthStatus(
+            source: .none,
+            hasAccessToken: false,
+            hasRefreshToken: false,
+            expiresAt: nil
+        )
+    }
+
+    private func readClaudeCredentialsDataFromKeychain() -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return data
+    }
+
+    private func parseClaudeLocalOAuthStatus(from data: Data, source: ClaudeCredentialSource) -> ClaudeLocalOAuthStatus? {
+        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let oauth = (raw["claudeAiOauth"] as? [String: Any]) ?? raw
+
+        let accessToken = stringValue(in: oauth, keys: ["accessToken", "access_token"])
+        let refreshToken = stringValue(in: oauth, keys: ["refreshToken", "refresh_token"])
+        let expiresAtMs = numericValue(in: oauth, keys: ["expiresAt", "expires_at"]).map { value in
+            value > 10_000_000_000 ? value : value * 1000
+        }
+        let expiresAt = expiresAtMs.map { Date(timeIntervalSince1970: $0 / 1000) }
+
+        guard accessToken != nil || refreshToken != nil else { return nil }
+
+        return ClaudeLocalOAuthStatus(
+            source: source,
+            hasAccessToken: accessToken != nil,
+            hasRefreshToken: refreshToken != nil,
+            expiresAt: expiresAt
+        )
+    }
+
+    private func stringValue(in dict: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = dict[key] as? String, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func numericValue(in dict: [String: Any], keys: [String]) -> Double? {
+        for key in keys {
+            if let value = dict[key] as? Double {
+                return value
+            }
+            if let value = dict[key] as? Int {
+                return Double(value)
+            }
+            if let value = dict[key] as? Int64 {
+                return Double(value)
+            }
+            if let value = dict[key] as? NSNumber {
+                return value.doubleValue
+            }
+            if let value = dict[key] as? String, let parsed = Double(value) {
+                return parsed
+            }
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private func providerLogSection(for provider: ProviderId) -> some View {
+        let health = store.healthMap[provider.rawValue]
+        let snapshotUpdatedAt = store.snapshots.first(where: { $0.id == provider.rawValue })?.updatedAt
+
+        DisclosureGroup(isExpanded: expandedBinding(for: provider)) {
+            VStack(alignment: .leading, spacing: 6) {
+                logRow(title: "Snapshot updated", value: dateText(snapshotUpdatedAt))
+                logRow(title: "Last success", value: dateText(health?.lastSuccessAt))
+                logRow(title: "Last failure", value: dateText(health?.lastFailureAt))
+                logRow(title: "Latency", value: health?.latencyMs.map { "\($0)ms" } ?? "-")
+                logRow(title: "Consecutive failures", value: "\(health?.consecutiveFailures ?? 0)")
+                if let error = health?.lastErrorMessage, !error.isEmpty {
+                    logRow(title: "Last error", value: error)
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            HStack {
+                Text("Fetch Log")
+                Spacer()
+                Text(providerLogStatusText(health: health, snapshotUpdatedAt: snapshotUpdatedAt))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(providerLogStatusColor(health: health))
+            }
+        }
+    }
+
+    private func logRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        }
+    }
+
+    private func expandedBinding(for provider: ProviderId) -> Binding<Bool> {
+        Binding(
+            get: { expandedLogs.contains(provider) },
+            set: { expanded in
+                if expanded {
+                    expandedLogs.insert(provider)
+                } else {
+                    expandedLogs.remove(provider)
+                }
+            }
+        )
+    }
+
+    private func providerLogStatusText(health: FetchHealth?, snapshotUpdatedAt: Date?) -> String {
+        if let success = health?.lastSuccessAt {
+            return "OK \(dateText(success))"
+        }
+        if let failure = health?.lastFailureAt {
+            return "FAIL \(dateText(failure))"
+        }
+        if let snapshotUpdatedAt {
+            return "SNAPSHOT \(dateText(snapshotUpdatedAt))"
+        }
+        return "NO RECORD"
+    }
+
+    private func providerLogStatusColor(health: FetchHealth?) -> Color {
+        if health?.lastSuccessAt != nil { return .green }
+        if health?.lastFailureAt != nil { return .red }
+        return .secondary
+    }
+
+    private func dateText(_ date: Date?) -> String {
+        guard let date else { return "-" }
+        return date.formatted(date: .abbreviated, time: .standard)
+    }
 }
 
 private struct TestResult {
     let success: Bool
     let message: String
+}
+
+private enum ClaudeCredentialSource {
+    case keychain
+    case file
+    case none
+}
+
+private struct ClaudeLocalOAuthStatus {
+    let source: ClaudeCredentialSource
+    let hasAccessToken: Bool
+    let hasRefreshToken: Bool
+    let expiresAt: Date?
+}
+
+private enum TerminalLaunchResult {
+    case opened
+    case permissionDenied
+    case scriptCreationFailed
+    case scriptError(code: Int, message: String)
 }
 
 extension ProviderId {

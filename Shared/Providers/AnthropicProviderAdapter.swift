@@ -10,12 +10,8 @@ struct AnthropicProviderAdapter: ServiceProvider {
             return cached
         }
 
-        // Strategy 2: Direct OAuth API call using Claude Code credentials from Keychain.
-        if let oauthResult = try await fetchViaOAuth() {
-            return oauthResult
-        }
-
-        throw ProviderError.notAuthenticated("Claude (no OAuth credentials or folder access)")
+        // Strategy 2: Direct OAuth API call with refresh-token fallback.
+        return try await fetchViaOAuth()
     }
 
     // MARK: - Strategy 1: OMC Usage Cache
@@ -88,37 +84,40 @@ struct AnthropicProviderAdapter: ServiceProvider {
 
     // MARK: - Strategy 2: Direct OAuth API
 
-    private func fetchViaOAuth() async throws -> ServiceSnapshot? {
-        guard let token = readClaudeCodeOAuthToken() else { return nil }
-
-        var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.addValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            return nil // Don't throw — fall through to error
+    private func fetchViaOAuth() async throws -> ServiceSnapshot {
+        guard var credentials = readClaudeCodeOAuthCredentials() else {
+            throw ProviderError.notAuthenticated("Claude OAuth credentials not found")
         }
 
-        let decoded = try JSONDecoder().decode(OAuthUsageResponse.self, from: data)
+        guard let accessToken = try await validAccessToken(from: &credentials), !accessToken.isEmpty else {
+            throw ProviderError.notAuthenticated("Claude OAuth token expired. Reconnect in Settings.")
+        }
 
+        do {
+            let decoded = try await requestOAuthUsage(accessToken: accessToken)
+            return makeSnapshot(from: decoded)
+        } catch ProviderError.httpError(let code, _) where code == 401 {
+            // Token can be revoked/expired before local expiresAt. Refresh once and retry.
+            guard let refreshToken = credentials.refreshToken,
+                  let refreshed = try await refreshAccessToken(refreshToken: refreshToken) else {
+                throw ProviderError.notAuthenticated("Claude OAuth token expired. Reconnect in Settings.")
+            }
+            credentials.accessToken = refreshed.accessToken
+            credentials.refreshToken = refreshed.refreshToken ?? credentials.refreshToken
+            credentials.expiresAtMs = refreshed.expiresAtMs
+            writeClaudeCodeOAuthCredentials(credentials)
+
+            let decoded = try await requestOAuthUsage(accessToken: credentials.accessToken)
+            return makeSnapshot(from: decoded)
+        }
+    }
+
+    private func makeSnapshot(from decoded: OAuthUsageResponse) -> ServiceSnapshot {
         let fiveHour = Int(decoded.fiveHour?.utilization ?? 0)
         let weekly = Int(decoded.sevenDay?.utilization ?? 0)
 
-        let resetDate: Date
-        if let d = parseISO8601Date(decoded.fiveHour?.resetsAt) {
-            resetDate = d
-        } else {
-            resetDate = Date().addingTimeInterval(3600)
-        }
-        let weeklyReset: Date
-        if let d = parseISO8601Date(decoded.sevenDay?.resetsAt) {
-            weeklyReset = d
-        } else {
-            weeklyReset = Date().addingTimeInterval(7 * 24 * 3600)
-        }
-
+        let resetDate = parseISO8601Date(decoded.fiveHour?.resetsAt) ?? Date().addingTimeInterval(3600)
+        let weeklyReset = parseISO8601Date(decoded.sevenDay?.resetsAt) ?? Date().addingTimeInterval(7 * 24 * 3600)
         let primaryPercent = max(fiveHour, weekly)
 
         return ServiceSnapshot(
@@ -139,13 +138,33 @@ struct AnthropicProviderAdapter: ServiceProvider {
         )
     }
 
-    // MARK: - Keychain OAuth Token
+    private func requestOAuthUsage(accessToken: String) async throws -> OAuthUsageResponse {
+        var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.addValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
-    private func readClaudeCodeOAuthToken() -> String? {
-        AnthropicProviderAdapter.readClaudeCodeOAuthTokenStatic()
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ProviderError.httpError(0, "Claude OAuth usage API")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw ProviderError.httpError(http.statusCode, "Claude OAuth usage API")
+        }
+
+        return try JSONDecoder().decode(OAuthUsageResponse.self, from: data)
     }
 
-    private static func readClaudeCodeOAuthTokenStatic() -> String? {
+    // MARK: - Keychain OAuth Token
+
+    private func readClaudeCodeOAuthCredentials() -> ClaudeOAuthCredentials? {
+        if let creds = AnthropicProviderAdapter.readClaudeCodeOAuthCredentialsFromKeychain() {
+            return creds
+        }
+        return readClaudeCodeOAuthCredentialsFromFile()
+    }
+
+    private static func readClaudeCodeOAuthCredentialsFromKeychain() -> ClaudeOAuthCredentials? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
@@ -156,19 +175,185 @@ struct AnthropicProviderAdapter: ServiceProvider {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return parseOAuthCredentials(from: data, source: .keychain)
+    }
 
-        // Parse JSON to extract accessToken
-        struct ClaudeCredentials: Decodable {
-            let claudeAiOauth: OAuthFields?
-            let accessToken: String?
+    private func readClaudeCodeOAuthCredentialsFromFile() -> ClaudeOAuthCredentials? {
+        guard let data = ExternalDataAccess.shared.withDirectoryAccess(for: .claude, { claudeDir in
+            let credsURL = claudeDir.appendingPathComponent(".credentials.json")
+            return try? Data(contentsOf: credsURL)
+        }) else { return nil }
+        return AnthropicProviderAdapter.parseOAuthCredentials(from: data, source: .file)
+    }
 
-            struct OAuthFields: Decodable {
-                let accessToken: String?
+    private static func parseOAuthCredentials(from data: Data, source: OAuthCredentialSource) -> ClaudeOAuthCredentials? {
+        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let oauth = (raw["claudeAiOauth"] as? [String: Any]) ?? raw
+
+        guard let accessToken = stringValue(in: oauth, keys: ["accessToken", "access_token"]), !accessToken.isEmpty else {
+            return nil
+        }
+
+        let refreshToken = stringValue(in: oauth, keys: ["refreshToken", "refresh_token"])
+        let expiresAtMs = numericValue(in: oauth, keys: ["expiresAt", "expires_at"]).map { value in
+            value > 10_000_000_000 ? value : value * 1000
+        }
+
+        return ClaudeOAuthCredentials(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAtMs: expiresAtMs,
+            source: source
+        )
+    }
+
+    private func validAccessToken(from credentials: inout ClaudeOAuthCredentials) async throws -> String? {
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        if let expiresAtMs = credentials.expiresAtMs {
+            if expiresAtMs - nowMs > 60_000 {
+                return credentials.accessToken
+            }
+        } else {
+            return credentials.accessToken
+        }
+
+        guard let refreshToken = credentials.refreshToken,
+              let refreshed = try await refreshAccessToken(refreshToken: refreshToken) else {
+            return nil
+        }
+
+        credentials.accessToken = refreshed.accessToken
+        credentials.refreshToken = refreshed.refreshToken ?? credentials.refreshToken
+        credentials.expiresAtMs = refreshed.expiresAtMs
+        writeClaudeCodeOAuthCredentials(credentials)
+        return credentials.accessToken
+    }
+
+    private func refreshAccessToken(refreshToken: String) async throws -> RefreshedOAuthToken? {
+        var request = URLRequest(url: URL(string: "https://platform.claude.com/v1/oauth/token")!)
+        request.httpMethod = "POST"
+        request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let clientID = ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_CLIENT_ID"]
+            ?? Self.defaultOAuthClientID
+
+        let formValues: [String: String] = [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": clientID
+        ]
+        let form = formValues
+            .map { key, value in
+                "\(Self.percentEncode(key))=\(Self.percentEncode(value))"
+            }
+            .joined(separator: "&")
+        request.httpBody = form.data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            return nil
+        }
+
+        let decoded = try JSONDecoder().decode(OAuthRefreshResponse.self, from: data)
+        guard !decoded.accessToken.isEmpty else { return nil }
+
+        let expiresAtMs: Double? = {
+            if let expiresIn = decoded.expiresIn {
+                return Date().timeIntervalSince1970 * 1000 + (expiresIn * 1000)
+            }
+            if let expiresAt = decoded.expiresAt {
+                return expiresAt > 10_000_000_000 ? expiresAt : expiresAt * 1000
+            }
+            return nil
+        }()
+
+        return RefreshedOAuthToken(
+            accessToken: decoded.accessToken,
+            refreshToken: decoded.refreshToken,
+            expiresAtMs: expiresAtMs
+        )
+    }
+
+    private func writeClaudeCodeOAuthCredentials(_ credentials: ClaudeOAuthCredentials) {
+        switch credentials.source {
+        case .keychain:
+            Self.writeClaudeCodeOAuthCredentialsToKeychain(credentials)
+        case .file:
+            break
+        }
+    }
+
+    private static func writeClaudeCodeOAuthCredentialsToKeychain(_ credentials: ClaudeOAuthCredentials) {
+        let readQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        let readStatus = SecItemCopyMatching(readQuery as CFDictionary, &result)
+        guard readStatus == errSecSuccess, let data = result as? Data else { return }
+        guard var raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+
+        if var oauth = raw["claudeAiOauth"] as? [String: Any] {
+            oauth["accessToken"] = credentials.accessToken
+            oauth["refreshToken"] = credentials.refreshToken
+            if let expiresAtMs = credentials.expiresAtMs {
+                oauth["expiresAt"] = Int64(expiresAtMs.rounded())
+            }
+            raw["claudeAiOauth"] = oauth
+        } else {
+            raw["accessToken"] = credentials.accessToken
+            raw["refreshToken"] = credentials.refreshToken
+            if let expiresAtMs = credentials.expiresAtMs {
+                raw["expiresAt"] = Int64(expiresAtMs.rounded())
             }
         }
 
-        guard let creds = try? JSONDecoder().decode(ClaudeCredentials.self, from: data) else { return nil }
-        return creds.claudeAiOauth?.accessToken ?? creds.accessToken
+        guard let updatedData = try? JSONSerialization.data(withJSONObject: raw) else { return }
+        let updateQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials"
+        ]
+        let attributes: [String: Any] = [
+            kSecValueData as String: updatedData
+        ]
+        _ = SecItemUpdate(updateQuery as CFDictionary, attributes as CFDictionary)
+    }
+
+    private static func stringValue(in dict: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = dict[key] as? String, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func numericValue(in dict: [String: Any], keys: [String]) -> Double? {
+        for key in keys {
+            if let value = dict[key] as? Double {
+                return value
+            }
+            if let value = dict[key] as? Int {
+                return Double(value)
+            }
+            if let value = dict[key] as? Int64 {
+                return Double(value)
+            }
+            if let value = dict[key] as? NSNumber {
+                return value.doubleValue
+            }
+            if let value = dict[key] as? String, let parsed = Double(value) {
+                return parsed
+            }
+        }
+        return nil
+    }
+
+    private static func percentEncode(_ value: String) -> String {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     private func parseISO8601Date(_ value: String?) -> Date? {
@@ -190,6 +375,8 @@ struct AnthropicProviderAdapter: ServiceProvider {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
+
+    private static let defaultOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 }
 
 // MARK: - OAuth API Response
@@ -212,4 +399,36 @@ private struct OAuthUsageResponse: Decodable {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
     }
+}
+
+private struct OAuthRefreshResponse: Decodable {
+    let accessToken: String
+    let refreshToken: String?
+    let expiresIn: Double?
+    let expiresAt: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case expiresIn = "expires_in"
+        case expiresAt = "expires_at"
+    }
+}
+
+private struct RefreshedOAuthToken {
+    let accessToken: String
+    let refreshToken: String?
+    let expiresAtMs: Double?
+}
+
+private enum OAuthCredentialSource {
+    case keychain
+    case file
+}
+
+private struct ClaudeOAuthCredentials {
+    var accessToken: String
+    var refreshToken: String?
+    var expiresAtMs: Double?
+    let source: OAuthCredentialSource
 }

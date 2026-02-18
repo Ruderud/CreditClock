@@ -8,8 +8,13 @@ final class ServiceStore: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published var lastError: String?
     @Published private(set) var healthMap: [String: FetchHealth] = [:]
+    @Published private(set) var lastRefreshStartedAt: Date?
+    @Published private(set) var lastRefreshFinishedAt: Date?
+    @Published private(set) var lastRefreshSucceeded: Bool?
+    @Published private(set) var lastRefreshFailureCount: Int = 0
 
     private var providers: [ServiceProvider]
+    private var scheduler: PollingScheduler?
     private let snapshotStore: SnapshotStore
     private let credentialStore: CredentialStore
     private let refreshStateStore: RefreshStateStore
@@ -37,16 +42,28 @@ final class ServiceStore: ObservableObject {
 
         let cached = snapshotStore.load()
         self.snapshots = cached
+        if providers == nil {
+            reconcilePolling()
+        }
     }
 
     func refresh() async {
         let refreshStartedAt = Date()
+        lastRefreshStartedAt = refreshStartedAt
+        lastRefreshFinishedAt = nil
+        lastRefreshSucceeded = nil
+        lastRefreshFailureCount = 0
         isRefreshing = true
         refreshStateStore.setRefreshing(true)
         WidgetCenter.shared.reloadAllTimelines()
         lastError = nil
 
         providers = ServiceStore.buildProviders(credentialStore: credentialStore)
+        if providers.isEmpty {
+            stopPolling()
+        } else {
+            startPollingIfNeeded()
+        }
         let previousByServiceId = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
 
         guard !providers.isEmpty else {
@@ -54,11 +71,15 @@ final class ServiceStore: ObservableObject {
             // local folder access is not configured yet.
             snapshotStore.save(snapshots)
             WidgetCenter.shared.reloadAllTimelines()
+            lastRefreshFinishedAt = Date()
+            lastRefreshSucceeded = nil
+            lastRefreshFailureCount = 0
             await finishRefresh(startedAt: refreshStartedAt)
             return
         }
 
         var next: [ServiceSnapshot] = []
+        var failureCount = 0
 
         for provider in providers {
             let start = CFAbsoluteTimeGetCurrent()
@@ -70,6 +91,7 @@ final class ServiceStore: ObservableObject {
                 health.recordSuccess(latencyMs: ms)
                 healthMap[provider.serviceId] = health
             } catch {
+                failureCount += 1
                 lastError = error.localizedDescription
                 var health = healthMap[provider.serviceId] ?? .initial
                 health.recordFailure(error: error.localizedDescription)
@@ -86,6 +108,9 @@ final class ServiceStore: ObservableObject {
             WidgetCenter.shared.reloadAllTimelines()
         }
 
+        lastRefreshFinishedAt = Date()
+        lastRefreshFailureCount = failureCount
+        lastRefreshSucceeded = failureCount == 0
         await finishRefresh(startedAt: refreshStartedAt)
     }
 
@@ -93,6 +118,15 @@ final class ServiceStore: ObservableObject {
     func refreshReturningSuccess() async -> Bool {
         await refresh()
         return lastError == nil
+    }
+
+    func reconcilePolling() {
+        providers = ServiceStore.buildProviders(credentialStore: credentialStore)
+        if providers.isEmpty {
+            stopPolling()
+            return
+        }
+        startPollingIfNeeded()
     }
 
     private func finishRefresh(startedAt: Date) async {
@@ -106,6 +140,21 @@ final class ServiceStore: ObservableObject {
         isRefreshing = false
         refreshStateStore.setRefreshing(false)
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    private func startPollingIfNeeded() {
+        guard scheduler == nil else { return }
+        let next = PollingScheduler { [weak self] in
+            guard let self else { return false }
+            return await self.refreshReturningSuccess()
+        }
+        scheduler = next
+        next.start()
+    }
+
+    private func stopPolling() {
+        scheduler?.stop()
+        scheduler = nil
     }
 
     private static func buildProviders(credentialStore: CredentialStore) -> [ServiceProvider] {

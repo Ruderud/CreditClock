@@ -37,12 +37,15 @@ targets:
       GENERATE_INFOPLIST_FILE: YES
       INFOPLIST_KEY_CFBundleDisplayName: CreditClock
       INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+      INFOPLIST_KEY_NSAppleEventsUsageDescription: CreditClock needs permission to open Terminal and run Claude CLI login.
       CODE_SIGN_STYLE: Automatic
     entitlements:
       path: CreditClockApp/CreditClock.entitlements
       properties:
         com.apple.security.app-sandbox: true
+        com.apple.security.automation.apple-events: true
         com.apple.security.network.client: true
+        com.apple.security.network.server: true
         com.apple.security.files.user-selected.read-only: true
         com.apple.security.application-groups:
           - group.com.creditclock.shared
@@ -50,6 +53,10 @@ targets:
           - .claude/
           - .codex/
           - .gemini/
+          - .local/
+        com.apple.security.temporary-exception.files.absolute-path.read-only:
+          - /opt/homebrew/
+          - /usr/local/
         com.apple.security.temporary-exception.files.home-relative-path.read-write:
           - .creditclock/
           - Library/Containers/com.creditclock.app.widget/

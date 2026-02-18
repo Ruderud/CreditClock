@@ -44,7 +44,7 @@ struct ContentView: View {
                 Task { await store.refresh() }
             }) {
                 NavigationStack {
-                    ProviderSettingsView()
+                    ProviderSettingsView(store: store)
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
                                 Button("Done") { showSettings = false }

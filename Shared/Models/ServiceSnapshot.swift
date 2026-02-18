@@ -74,11 +74,15 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
     }
 
     var fiveHourRefillDate: Date {
-        fiveHourRefillAt ?? refillAt
+        let base = fiveHourRefillAt ?? refillAt
+        guard fiveHourRefillAt != nil else { return base }
+        return normalizeCyclicRefill(base, windowDuration: inferredFiveHourWindowDuration)
     }
 
     var weeklyRefillDate: Date {
-        weeklyRefillAt ?? refillAt
+        let base = weeklyRefillAt ?? refillAt
+        guard weeklyRefillAt != nil else { return base }
+        return normalizeCyclicRefill(base, windowDuration: inferredWeeklyWindowDuration)
     }
 
     var fiveHourRefillRemainingText: String {
@@ -139,12 +143,61 @@ struct ServiceSnapshot: Codable, Identifiable, Hashable {
         parsePercent(token: "wk")
     }
 
+    private var inferredFiveHourWindowDuration: TimeInterval? {
+        switch id {
+        case "openai", "anthropic":
+            return 5 * 3600
+        case "gemini":
+            return 24 * 3600
+        default:
+            return parseWindowDuration(from: primaryRingTitle)
+                ?? parseWindowDuration(from: primaryQuotaTitle)
+        }
+    }
+
+    private var inferredWeeklyWindowDuration: TimeInterval? {
+        switch id {
+        case "openai", "anthropic":
+            return 7 * 24 * 3600
+        case "gemini":
+            return 24 * 3600
+        default:
+            return parseWindowDuration(from: secondaryQuotaTitle)
+        }
+    }
+
     private func parsePercent(token: String) -> Double? {
         guard let range = name.range(of: "\(token):", options: .caseInsensitive) else { return nil }
         let suffix = name[range.upperBound...]
         let digits = suffix.prefix { $0.isNumber }
         guard let value = Int(digits) else { return nil }
         return min(max(Double(value) / 100, 0), 1)
+    }
+
+    private func normalizeCyclicRefill(_ target: Date, windowDuration: TimeInterval?) -> Date {
+        guard let windowDuration, windowDuration > 0 else { return target }
+        let remaining = target.timeIntervalSinceNow
+        guard remaining < 0 else { return target }
+        let elapsed = -remaining
+        let cyclesToAdvance = floor(elapsed / windowDuration) + 1
+        return target.addingTimeInterval(cyclesToAdvance * windowDuration)
+    }
+
+    private func parseWindowDuration(from label: String?) -> TimeInterval? {
+        guard let label else { return nil }
+        let lowered = label.lowercased()
+        let digits = lowered.prefix { $0.isNumber }
+        guard let value = Double(digits), value > 0 else { return nil }
+        if lowered.contains("day") || lowered.hasSuffix("d") {
+            return value * 24 * 3600
+        }
+        if lowered.contains("week") || lowered.hasSuffix("w") || lowered.contains("wk") {
+            return value * 7 * 24 * 3600
+        }
+        if lowered.contains("hour") || lowered.hasSuffix("h") {
+            return value * 3600
+        }
+        return nil
     }
 
     private func ringProgress(updatedAt: Date, refillAt: Date) -> Double {
