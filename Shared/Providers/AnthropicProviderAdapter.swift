@@ -7,11 +7,67 @@ struct AnthropicProviderAdapter: ServiceProvider {
     func fetchSnapshot() async throws -> ServiceSnapshot {
         // Strategy 1: Read from OMC cache first to avoid frequent keychain prompts.
         if let cached = readOMCCache() {
+            ProviderRecovery.log(.info, "[claude] load success source=omcCache")
             return cached
         }
+        ProviderRecovery.log(.debug, "[claude] omc cache unavailable, trying oauth")
 
         // Strategy 2: Direct OAuth API call with refresh-token fallback.
-        return try await fetchViaOAuth()
+        var oauthError: Error?
+        do {
+            let oauthResult = try await fetchViaOAuth()
+            ProviderRecovery.log(.info, "[claude] load success source=oauth")
+            return oauthResult
+        } catch {
+            ProviderRecovery.log(.default, "[claude] oauth failed: \(error.localizedDescription)")
+            oauthError = error
+        }
+
+        // Token can expire; for OAuth 401, run Claude CLI once to refresh auth artifacts,
+        // then retry cache/OAuth once.
+        if let oauthFailure = oauthError, ProviderRecovery.isUnauthorized(oauthFailure) {
+            guard ProviderRecovery.canRunCLIWarmup else {
+                ProviderRecovery.log(
+                    .default,
+                    "[claude] oauth 401 but sandbox blocks CLI warmup. Re-authenticate via Terminal (`claude login`)."
+                )
+                throw oauthFailure
+            }
+            ProviderRecovery.log(.default, "[claude] oauth 401 detected, attempting CLI warmup")
+            let ranWarmup = await ProviderRecovery.runCLIWarmup(
+                command: "claude",
+                arguments: [
+                    "-p",
+                    "ping",
+                    "--output-format",
+                    "json"
+                ]
+            )
+            ProviderRecovery.log(
+                .info,
+                "[claude] warmup \(ranWarmup ? "executed" : "skipped_or_failed"), retrying cache/oauth"
+            )
+
+            if let cached = readOMCCache() {
+                ProviderRecovery.log(.info, "[claude] load success after warmup source=omcCache")
+                return cached
+            }
+            do {
+                let oauthResult = try await fetchViaOAuth()
+                ProviderRecovery.log(.info, "[claude] load success after warmup source=oauth")
+                return oauthResult
+            } catch {
+                ProviderRecovery.log(.default, "[claude] oauth retry failed: \(error.localizedDescription)")
+                oauthError = error
+            }
+        }
+
+        if let oauthError {
+            ProviderRecovery.log(.error, "[claude] load failed with oauth error: \(oauthError.localizedDescription)")
+            throw oauthError
+        }
+        ProviderRecovery.log(.error, "[claude] load failed: not authenticated")
+        throw ProviderError.notAuthenticated("Claude (no OAuth credentials or folder access)")
     }
 
     // MARK: - Strategy 1: OMC Usage Cache

@@ -4,22 +4,64 @@ struct OpenAIProviderAdapter: ServiceProvider {
     let serviceId = "openai"
 
     func fetchSnapshot() async throws -> ServiceSnapshot {
+        if let local = fetchFromLocalSources() {
+            ProviderRecovery.log(.info, "[codex] load success (local source)")
+            return local
+        }
+
+        guard ProviderRecovery.canRunCLIWarmup else {
+            ProviderRecovery.log(
+                .default,
+                "[codex] local load failed and sandbox blocks CLI warmup. Waiting for next local cache update."
+            )
+            throw ProviderError.notAuthenticated("Codex (folder access not granted or credentials missing)")
+        }
+
+        // Codex auth can expire. Run CLI once to refresh local artifacts, then retry.
+        ProviderRecovery.log(.default, "[codex] local load failed, attempting CLI warmup")
+        let ranWarmup = await ProviderRecovery.runCLIWarmup(
+            command: "codex",
+            arguments: [
+                "exec",
+                "--json",
+                "--skip-git-repo-check",
+                "ping"
+            ]
+        )
+        ProviderRecovery.log(
+            .info,
+            "[codex] warmup \(ranWarmup ? "executed" : "skipped_or_failed"), retrying local load"
+        )
+
+        if let local = fetchFromLocalSources() {
+            ProviderRecovery.log(.info, "[codex] load success after warmup")
+            return local
+        }
+        ProviderRecovery.log(.error, "[codex] load failed after warmup retry")
+        throw ProviderError.notAuthenticated("Codex (folder access not granted or credentials missing)")
+    }
+
+    private func fetchFromLocalSources() -> ServiceSnapshot? {
         // Strategy 1: Read usage cache
         if let cached = readUsageCache() {
+            ProviderRecovery.log(.debug, "[codex] source=usageCache")
             return cached
         }
 
         // Strategy 2: Parse session logs directly and write cache
         if let parsed = parseSessionLogsAndCache() {
+            ProviderRecovery.log(.debug, "[codex] source=sessionLogs")
             return parsed
         }
 
         // Strategy 3: JWT subscription info fallback
         if let jwt = readCodexAuth() {
+            ProviderRecovery.log(.debug, "[codex] source=authJwt")
             return jwt
         }
 
-        throw ProviderError.notAuthenticated("Codex (folder access not granted or credentials missing)")
+        ProviderRecovery.log(.debug, "[codex] source=none")
+        return nil
     }
 
     // MARK: - Strategy 1: Usage Cache

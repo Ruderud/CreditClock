@@ -20,19 +20,24 @@ struct GeminiProviderAdapter: ServiceProvider {
 
         do {
             if let snapshot = try await fetchViaCLIQuota() {
+                ProviderRecovery.log(.info, "[gemini] load success source=cliQuota")
                 return snapshot
             }
         } catch {
+            ProviderRecovery.log(.default, "[gemini] cli quota failed: \(error.localizedDescription)")
             cliError = error
         }
 
         if let snapshot = try await fetchViaAPIKey() {
+            ProviderRecovery.log(.info, "[gemini] load success source=apiKey")
             return snapshot
         }
 
         if let cliError {
+            ProviderRecovery.log(.error, "[gemini] load failed with cli error: \(cliError.localizedDescription)")
             throw cliError
         }
+        ProviderRecovery.log(.error, "[gemini] load failed: not authenticated")
         throw ProviderError.notAuthenticated("Gemini (no CLI OAuth credentials or API key)")
     }
 
@@ -44,6 +49,26 @@ struct GeminiProviderAdapter: ServiceProvider {
             return nil
         }
 
+        do {
+            return try await fetchCLIQuotaSnapshot(accessToken: accessToken)
+        } catch {
+            guard ProviderRecovery.isUnauthorized(error) else { throw error }
+            guard ProviderRecovery.canRunCLIWarmup else {
+                ProviderRecovery.log(
+                    .default,
+                    "[gemini] oauth 401 but sandbox blocks CLI warmup. Re-authenticate via Terminal (`gemini` login flow)."
+                )
+                throw error
+            }
+            ProviderRecovery.log(.default, "[gemini] cli oauth 401 detected, attempting CLI warmup")
+            if let recovered = try await recoverFromUnauthorized() {
+                return recovered
+            }
+            throw error
+        }
+    }
+
+    private func fetchCLIQuotaSnapshot(accessToken: String) async throws -> ServiceSnapshot? {
         let loadResponse = try await requestLoadCodeAssist(accessToken: accessToken)
         guard let projectId = loadResponse.cloudaicompanionProject, !projectId.isEmpty else {
             return nil
@@ -93,6 +118,35 @@ struct GeminiProviderAdapter: ServiceProvider {
             secondaryQuotaLabel: "Gemini 3 Pro",
             primaryRingLabel: "G3F"
         )
+    }
+
+    private func recoverFromUnauthorized() async throws -> ServiceSnapshot? {
+        let ranWarmup = await ProviderRecovery.runCLIWarmup(
+            command: "gemini",
+            arguments: [
+                "-p",
+                "ping",
+                "--output-format",
+                "json"
+            ]
+        )
+        ProviderRecovery.log(
+            .info,
+            "[gemini] warmup \(ranWarmup ? "executed" : "skipped_or_failed"), retrying token/quota"
+        )
+
+        guard var reloaded = Self.loadLocalOAuthCredentials(),
+              let retriedToken = try await validAccessToken(from: &reloaded),
+              !retriedToken.isEmpty else {
+            ProviderRecovery.log(.default, "[gemini] warmup retry aborted: missing reloaded token")
+            return nil
+        }
+
+        let snapshot = try await fetchCLIQuotaSnapshot(accessToken: retriedToken)
+        if snapshot != nil {
+            ProviderRecovery.log(.info, "[gemini] load success after warmup source=cliQuota")
+        }
+        return snapshot
     }
 
     // MARK: - Strategy 2: Gemini API Key fallback
