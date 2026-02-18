@@ -61,19 +61,37 @@ open CreditClock.xcodeproj
 
 In Xcode, run the `CreditClock` scheme.
 
+## Background Behavior
+
+- CreditClock runs as a menu bar agent (no Dock icon / no always-open main window).
+- After provider setup, it keeps polling in the background and pushes snapshot updates to widgets.
+- Closing the settings window does not stop background polling.
+- Choosing `Quit` from the menu bar stops polling until the app is launched again.
+- Enable `Launch at Login` in the menu bar panel if you want automatic startup after sign-in.
+
+## Widget Setup (Desktop)
+
+1. On the desktop, right-click an empty space and choose `Edit Widgets`.
+2. Search for `CreditClock`.
+3. Pick a size (`Medium` or `Large`) and add it to the desktop.
+4. Open the CreditClock menu bar panel and click `Refresh Now` once after initial setup.
+5. If the widget still shows `No synced data`, remove/re-add the widget after a refresh.
+
+## Settings Checklist
+
+- In `Settings` -> `Local Data Access`, click `Grant Codex + Claude + Gemini Together (Recommended)` and select your home folder (`~`) once.
+- For `OpenAI` and `Anthropic`, click `Connect`.
+- For `Anthropic`, use `Re-login Claude` if `Auth Status` or `Test` fails.
+- For `Gemini`, use local CLI OAuth (`~/.gemini/oauth_creds.json`) or save an API key and enable it.
+- Use provider `Test` buttons to verify each connection.
+
 ## How To Use
 
 1. Launch `CreditClock`.
 2. Open `Settings` from the menu bar icon (`creditcard.circle`).
-3. In `Local Data Access`, click `Grant Codex + Claude + Gemini Together (Recommended)`.
-4. Select your home folder (`~`) once.
-5. Configure providers:
-   - `OpenAI`, `Anthropic`: click `Connect`.
-   - `Gemini`: use local CLI OAuth (`~/.gemini/oauth_creds.json`) or save an API key.
-6. Click `Test` per provider (optional but recommended).
-7. Close settings. CreditClock keeps polling in the background and updates widgets automatically.
-8. Add the CreditClock widget to your desktop.
-9. (Optional) In the menu bar panel, enable `Launch at Login`.
+3. Complete the steps in `Settings Checklist`.
+4. Follow `Widget Setup (Desktop)` to add the widget.
+5. Leave CreditClock running in the menu bar (optional: enable `Launch at Login`).
 
 > Installation note (as of February 17, 2026): CreditClock is not code-signed yet, so install/run it directly from Xcode (`CreditClock` scheme).
 
@@ -82,6 +100,7 @@ In Xcode, run the `CreditClock` scheme.
 - `No providers configured`: open `Settings` and connect at least one provider.
 - Widget shows `No synced data`: refresh once in app, then remove/re-add the widget.
 - Folder access errors: re-open `Settings` and re-grant local access.
+- Widget stops updating after reboot/login: make sure `Launch at Login` is enabled.
 
 ## Privacy
 

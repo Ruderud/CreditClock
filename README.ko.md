@@ -61,19 +61,37 @@ open CreditClock.xcodeproj
 
 Xcode에서 `CreditClock` 스킴을 실행하세요.
 
+## 백그라운드 동작 방식
+
+- CreditClock는 메뉴바 에이전트로 동작합니다 (Dock 아이콘/상시 메인 창 없음).
+- Provider 설정이 끝나면 백그라운드에서 주기적으로 폴링하고 위젯 데이터를 갱신합니다.
+- 설정 창을 닫아도 백그라운드 폴링은 계속 유지됩니다.
+- 메뉴바에서 `Quit`를 누르면 앱이 완전히 종료되어 폴링도 중단됩니다.
+- 로그인 후 자동 실행이 필요하면 메뉴바 패널에서 `Launch at Login`을 켜세요.
+
+## 위젯 추가 방법 (데스크탑)
+
+1. 데스크탑 빈 공간을 우클릭하고 `Edit Widgets`를 선택합니다.
+2. `CreditClock`를 검색합니다.
+3. 크기(`Medium` 또는 `Large`)를 선택해 데스크탑에 추가합니다.
+4. 초기 설정 후 CreditClock 메뉴바 패널에서 `Refresh Now`를 1회 누릅니다.
+5. 위젯에 계속 `No synced data`가 보이면, 리프레시 후 위젯을 제거/재추가합니다.
+
+## 설정 체크리스트
+
+- `Settings` -> `Local Data Access`에서 `Grant Codex + Claude + Gemini Together (Recommended)`를 누르고 홈 폴더(`~`)를 1회 선택합니다.
+- `OpenAI`, `Anthropic`는 `Connect`를 눌러 연결합니다.
+- `Anthropic` 테스트가 실패하면 `Re-login Claude`를 사용합니다.
+- `Gemini`는 로컬 CLI OAuth(`~/.gemini/oauth_creds.json`)를 사용하거나 API 키를 저장 후 활성화합니다.
+- Provider별 `Test` 버튼으로 연결 상태를 확인합니다.
+
 ## 사용 방법
 
 1. `CreditClock` 앱을 실행합니다.
 2. 메뉴바 아이콘(`creditcard.circle`)에서 `Settings`를 엽니다.
-3. `Local Data Access`에서 `Grant Codex + Claude + Gemini Together (Recommended)`를 누릅니다.
-4. 홈 폴더(`~`)를 1회 선택합니다.
-5. Provider를 설정합니다.
-   - `OpenAI`, `Anthropic`: `Connect` 클릭
-   - `Gemini`: 로컬 CLI OAuth(`~/.gemini/oauth_creds.json`)를 사용하거나 API 키를 저장
-6. Provider별 `Test` 실행 (선택이지만 권장)
-7. 설정 창을 닫으면 앱이 백그라운드에서 폴링을 유지하며 위젯을 자동 갱신합니다.
-8. 데스크탑에 CreditClock 위젯을 추가합니다.
-9. (선택) 메뉴바 패널에서 `Launch at Login`을 켭니다.
+3. 위 `설정 체크리스트`를 완료합니다.
+4. `위젯 추가 방법 (데스크탑)`에 따라 위젯을 추가합니다.
+5. CreditClock를 메뉴바에서 계속 실행 상태로 유지합니다 (선택: `Launch at Login` 활성화).
 
 > 설치 안내 (2026-02-17 기준): CreditClock는 아직 코드사이닝되지 않아 실제 설치/실행은 Xcode에서 `CreditClock` 스킴으로 직접 진행해야 합니다.
 
@@ -82,6 +100,7 @@ Xcode에서 `CreditClock` 스킴을 실행하세요.
 - `No providers configured`: `Settings`에서 최소 1개 Provider를 연결하세요.
 - 위젯에 `No synced data` 표시: 앱에서 `Refresh` 1회 후 위젯을 제거/재추가하세요.
 - 폴더 권한 오류: `Settings`에서 로컬 권한을 다시 승인하세요.
+- 재부팅 후 위젯 갱신이 멈춤: 메뉴바에서 `Launch at Login`이 켜져 있는지 확인하세요.
 
 ## 개인정보/보안
 
