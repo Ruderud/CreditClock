@@ -64,15 +64,16 @@ Xcode에서 `CreditClock` 스킴을 실행하세요.
 ## 사용 방법
 
 1. `CreditClock` 앱을 실행합니다.
-2. 우측 상단 톱니 버튼으로 `Settings`를 엽니다.
+2. 메뉴바 아이콘(`creditcard.circle`)에서 `Settings`를 엽니다.
 3. `Local Data Access`에서 `Grant Codex + Claude + Gemini Together (Recommended)`를 누릅니다.
 4. 홈 폴더(`~`)를 1회 선택합니다.
 5. Provider를 설정합니다.
    - `OpenAI`, `Anthropic`: `Connect` 클릭
    - `Gemini`: 로컬 CLI OAuth(`~/.gemini/oauth_creds.json`)를 사용하거나 API 키를 저장
 6. Provider별 `Test` 실행 (선택이지만 권장)
-7. 설정 창을 닫고 메인 화면에서 `Refresh`를 누릅니다.
+7. 설정 창을 닫으면 앱이 백그라운드에서 폴링을 유지하며 위젯을 자동 갱신합니다.
 8. 데스크탑에 CreditClock 위젯을 추가합니다.
+9. (선택) 메뉴바 패널에서 `Launch at Login`을 켭니다.
 
 > 설치 안내 (2026-02-17 기준): CreditClock는 아직 코드사이닝되지 않아 실제 설치/실행은 Xcode에서 `CreditClock` 스킴으로 직접 진행해야 합니다.
 
@@ -102,7 +103,7 @@ Xcode에서 `CreditClock` 스킴을 실행하세요.
 
 ```text
 CreditClock/
-├── CreditClockApp/                 # macOS 앱 (메인 화면 + 설정 + 메뉴바)
+├── CreditClockApp/                 # macOS 메뉴바 에이전트 + 설정
 ├── CreditClockWidget/              # WidgetKit 확장
 ├── Shared/
 │   ├── Models/                     # 스냅샷/상태 모델

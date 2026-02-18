@@ -526,6 +526,8 @@ private enum WidgetLocalUsageOverlay {
             return info
         }
 
+        guard !isSandboxed else { return nil }
+
         let directPath = appendRelativePath(
             relativePath,
             to: URL(fileURLWithPath: realHomeDirectory(), isDirectory: true)
@@ -591,6 +593,10 @@ private enum WidgetLocalUsageOverlay {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
+
+    private static var isSandboxed: Bool {
+        ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+    }
 }
 
 private struct LocalCacheInfo {

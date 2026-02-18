@@ -165,6 +165,7 @@ struct ProviderSettingsView: View {
                 set: {
                     connectionStore.setConnected($0, for: account.wrappedValue.provider)
                     connectionState[account.wrappedValue.provider] = $0
+                    syncStoreAfterConfigurationChange()
                 }
             )
         )
@@ -220,6 +221,7 @@ struct ProviderSettingsView: View {
             connectionStore.setConnected(true, for: account.provider)
             connectionState[account.provider] = true
             testResults[account.id] = TestResult(success: true, message: "Key saved")
+            syncStoreAfterConfigurationChange()
         } catch {
             testResults[account.id] = TestResult(success: false, message: error.localizedDescription)
         }
@@ -287,6 +289,7 @@ struct ProviderSettingsView: View {
                 localAccessMessage = "\(source.displayName) access granted."
             }
             refreshLocalAccessState()
+            syncStoreAfterConfigurationChange()
             return true
         } catch {
             localAccessMessage = "Failed to save bookmark: \(error.localizedDescription)"
@@ -298,6 +301,7 @@ struct ProviderSettingsView: View {
         ExternalDataAccess.shared.clearBookmark(for: source)
         localAccessMessage = "\(source.displayName) access removed."
         refreshLocalAccessState()
+        syncStoreAfterConfigurationChange()
     }
 
     private func loadConnectionState() {
@@ -321,6 +325,7 @@ struct ProviderSettingsView: View {
         connectionStore.setConnected(true, for: provider)
         connectionState[provider] = true
         testResults[provider.rawValue] = TestResult(success: true, message: "Connected")
+        syncStoreAfterConfigurationChange()
     }
 
     /// For local providers, request home-folder access once and reuse it for all sources.
@@ -376,6 +381,12 @@ struct ProviderSettingsView: View {
         connectionStore.setConnected(false, for: provider)
         connectionState[provider] = false
         testResults[provider.rawValue] = TestResult(success: true, message: "Disconnected")
+        syncStoreAfterConfigurationChange()
+    }
+
+    private func syncStoreAfterConfigurationChange() {
+        store.reconcilePolling()
+        Task { await store.refresh() }
     }
 
     private func runClaudeAuthStatus() async {

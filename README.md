@@ -64,15 +64,16 @@ In Xcode, run the `CreditClock` scheme.
 ## How To Use
 
 1. Launch `CreditClock`.
-2. Open `Settings` from the gear button.
+2. Open `Settings` from the menu bar icon (`creditcard.circle`).
 3. In `Local Data Access`, click `Grant Codex + Claude + Gemini Together (Recommended)`.
 4. Select your home folder (`~`) once.
 5. Configure providers:
    - `OpenAI`, `Anthropic`: click `Connect`.
    - `Gemini`: use local CLI OAuth (`~/.gemini/oauth_creds.json`) or save an API key.
 6. Click `Test` per provider (optional but recommended).
-7. Close settings and click `Refresh` in the main window.
+7. Close settings. CreditClock keeps polling in the background and updates widgets automatically.
 8. Add the CreditClock widget to your desktop.
+9. (Optional) In the menu bar panel, enable `Launch at Login`.
 
 > Installation note (as of February 17, 2026): CreditClock is not code-signed yet, so install/run it directly from Xcode (`CreditClock` scheme).
 
@@ -102,7 +103,7 @@ In Xcode, run the `CreditClock` scheme.
 
 ```text
 CreditClock/
-├── CreditClockApp/                 # macOS app (main window + settings + menu bar)
+├── CreditClockApp/                 # macOS menu bar agent + settings
 ├── CreditClockWidget/              # WidgetKit extension
 ├── Shared/
 │   ├── Models/                     # Snapshot/state models

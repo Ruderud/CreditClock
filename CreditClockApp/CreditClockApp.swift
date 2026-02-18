@@ -1,30 +1,30 @@
 import SwiftUI
-import WidgetKit
 
 @main
 struct CreditClockApp: App {
-    @StateObject private var store = ServiceStore()
+    @StateObject private var store: ServiceStore
+
+    init() {
+        let initialStore = ServiceStore()
+        _store = StateObject(wrappedValue: initialStore)
+
+        Task { @MainActor in
+            await initialStore.refresh()
+            initialStore.reconcilePolling()
+        }
+    }
 
     var body: some Scene {
-        WindowGroup {
-            ContentView(store: store)
-                .frame(minWidth: 620, minHeight: 480)
-                .task {
-                    await store.refresh()
-                    store.reconcilePolling()
-                }
-                .onChange(of: store.hasConfiguredProviders) { _, hasProviders in
-                    if hasProviders {
-                        store.reconcilePolling()
-                    } else {
-                        WidgetCenter.shared.reloadAllTimelines()
-                    }
-                }
-        }
-
         MenuBarExtra("CreditClock", systemImage: "creditcard.circle") {
             MenuBarView(store: store)
         }
         .menuBarExtraStyle(.window)
+
+        Settings {
+            NavigationStack {
+                ProviderSettingsView(store: store)
+            }
+            .frame(minWidth: 500, minHeight: 400)
+        }
     }
 }

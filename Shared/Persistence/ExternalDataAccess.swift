@@ -87,7 +87,11 @@ final class ExternalDataAccess {
                 saveBookmark(refreshed, for: source)
             }
 
-            ensureScopedAccessStarted(for: url)
+            if isSandboxed {
+                guard ensureScopedAccessStarted(for: url) else { return nil }
+            } else {
+                _ = ensureScopedAccessStarted(for: url)
+            }
 
             return body(resolvedDirectory(from: url, for: source))
         }
@@ -106,21 +110,23 @@ final class ExternalDataAccess {
     }
 
     /// Keep security-scoped access alive per process to avoid repeated permission prompts.
-    private func ensureScopedAccessStarted(for url: URL) {
+    @discardableResult
+    private func ensureScopedAccessStarted(for url: URL) -> Bool {
         let standardizedPath = url.standardizedFileURL.path
 
         accessLock.lock()
         if activeScopedPaths.contains(standardizedPath) {
             accessLock.unlock()
-            return
+            return true
         }
         accessLock.unlock()
 
-        guard url.startAccessingSecurityScopedResource() else { return }
+        guard url.startAccessingSecurityScopedResource() else { return false }
 
         accessLock.lock()
         activeScopedPaths.insert(standardizedPath)
         accessLock.unlock()
+        return true
     }
 
     private var isSandboxed: Bool {

@@ -1,7 +1,11 @@
+import ServiceManagement
 import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var store: ServiceStore
+    @Environment(\.openSettings) private var openSettings
+    @State private var launchAtLoginEnabled = false
+    @State private var launchAtLoginError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -34,13 +38,24 @@ struct MenuBarView: View {
 
             Divider()
 
+            Toggle("Launch at Login", isOn: Binding(
+                get: { launchAtLoginEnabled },
+                set: { updateLaunchAtLogin($0) }
+            ))
+
+            if let launchAtLoginError {
+                Text(launchAtLoginError)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
             Button {
-                NSApplication.shared.activate(ignoringOtherApps: true)
-                if let window = NSApplication.shared.windows.first {
-                    window.makeKeyAndOrderFront(nil)
-                }
+                openSettingsWithAppActivation()
             } label: {
-                Label("Open CreditClock", systemImage: "macwindow")
+                Label("Settings", systemImage: "gearshape")
             }
 
             Button("Quit") {
@@ -48,6 +63,14 @@ struct MenuBarView: View {
             }
         }
         .padding(8)
+        .onAppear {
+            launchAtLoginEnabled = currentLaunchAtLoginEnabled()
+        }
+    }
+
+    private func openSettingsWithAppActivation() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        openSettings()
     }
 
     private func statusColor(for state: SubscriptionState) -> Color {
@@ -57,5 +80,24 @@ struct MenuBarView: View {
         case .expired: return .red
         case .paused: return .yellow
         }
+    }
+
+    private func updateLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            launchAtLoginEnabled = enabled
+            launchAtLoginError = nil
+        } catch {
+            launchAtLoginEnabled = currentLaunchAtLoginEnabled()
+            launchAtLoginError = "Launch at Login update failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func currentLaunchAtLoginEnabled() -> Bool {
+        SMAppService.mainApp.status == .enabled
     }
 }
