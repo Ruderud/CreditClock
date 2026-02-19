@@ -506,7 +506,11 @@ private enum WidgetLocalUsageOverlay {
     }
 
     private static func readCodexCache() -> LocalCacheInfo? {
-        readCache(for: .codex, relativePath: ".usage-cache.json", maxAgeMs: 1_800_000)
+        guard let info = readCache(for: .codex, relativePath: ".usage-cache.json", maxAgeMs: 1_800_000) else {
+            return nil
+        }
+        guard isFreshCodexCache(info) else { return nil }
+        return info
     }
 
     private static func readGeminiCache() -> LocalCacheInfo? {
@@ -583,6 +587,17 @@ private enum WidgetLocalUsageOverlay {
             return date
         }
         return isoStandard.date(from: raw)
+    }
+
+    private static func isFreshCodexCache(_ info: LocalCacheInfo) -> Bool {
+        let now = Date()
+        let graceSeconds: TimeInterval = 90
+        guard let fiveHourRefillAt = info.fiveHourRefillAt,
+              let weeklyRefillAt = info.weeklyRefillAt else {
+            return false
+        }
+        return fiveHourRefillAt.timeIntervalSince(now) >= -graceSeconds
+            && weeklyRefillAt.timeIntervalSince(now) >= -graceSeconds
     }
 
     private static let isoWithFractional: ISO8601DateFormatter = {

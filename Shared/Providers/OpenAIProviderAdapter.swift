@@ -42,19 +42,19 @@ struct OpenAIProviderAdapter: ServiceProvider {
     }
 
     private func fetchFromLocalSources() -> ServiceSnapshot? {
-        // Strategy 1: Read usage cache
-        if let cached = readUsageCache() {
-            ProviderRecovery.log(.debug, "[codex] source=usageCache")
-            return cached
-        }
-
-        // Strategy 2: Parse session logs directly and write cache
+        // Strategy 1: Parse session logs directly and write cache (freshest).
         if let parsed = parseSessionLogsAndCache() {
             ProviderRecovery.log(.debug, "[codex] source=sessionLogs")
             return parsed
         }
 
-        // Strategy 3: JWT subscription info fallback
+        // Strategy 2: Read usage cache.
+        if let cached = readUsageCache() {
+            ProviderRecovery.log(.debug, "[codex] source=usageCache")
+            return cached
+        }
+
+        // Strategy 3: JWT subscription info fallback.
         if let jwt = readCodexAuth() {
             ProviderRecovery.log(.debug, "[codex] source=authJwt")
             return jwt
@@ -64,7 +64,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
         return nil
     }
 
-    // MARK: - Strategy 1: Usage Cache
+    // MARK: - Strategy 2: Usage Cache
 
     private func readUsageCache() -> ServiceSnapshot? {
         guard let data = ExternalDataAccess.shared.withDirectoryAccess(for: .codex, { codexDir in
@@ -76,7 +76,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
               let usage = cache.data,
               !cache.error else { return nil }
 
-        // Cache older than 30 minutes is stale (polling refreshes via Strategy 2)
+        // Cache older than 30 minutes is stale (polling refreshes via Strategy 1).
         let cacheAge = Date().timeIntervalSince1970 * 1000 - cache.timestamp
         guard cacheAge < 1_800_000 else { return nil }
 
@@ -85,13 +85,16 @@ struct OpenAIProviderAdapter: ServiceProvider {
         let primaryPercent = max(fiveH, weekly)
         let subscriptionDetail = readPlanDetailFromAuth()
 
-        let fiveHourReset: Date
-        if let d = parseISO8601Date(usage.fiveHourResetsAt) {
-            fiveHourReset = d
-        } else {
-            fiveHourReset = Date().addingTimeInterval(3600)
+        guard let fiveHourReset = parseISO8601Date(usage.fiveHourResetsAt),
+              let weeklyReset = parseISO8601Date(usage.weeklyResetsAt) else {
+            return nil
         }
-        let weeklyReset = parseISO8601Date(usage.weeklyResetsAt) ?? Date().addingTimeInterval(7 * 24 * 3600)
+
+        let now = Date()
+        if isResetWindowExpired(fiveHourReset: fiveHourReset, weeklyReset: weeklyReset, now: now) {
+            ProviderRecovery.log(.debug, "[codex] usage cache ignored (past reset timestamp)")
+            return nil
+        }
 
         return ServiceSnapshot(
             id: serviceId,
@@ -101,7 +104,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
             refillAt: fiveHourReset,
             subscriptionState: primaryPercent >= 90 ? .paused : .active,
             subscriptionDetail: subscriptionDetail,
-            updatedAt: Date(),
+            updatedAt: now,
             fiveHourUtilization: Double(fiveH) / 100,
             weeklyUtilization: Double(weekly) / 100,
             fiveHourRefillAt: fiveHourReset,
@@ -112,7 +115,7 @@ struct OpenAIProviderAdapter: ServiceProvider {
         )
     }
 
-    // MARK: - Strategy 2: Session Log Parsing
+    // MARK: - Strategy 1: Session Log Parsing
 
     private func parseSessionLogsAndCache() -> ServiceSnapshot? {
         ExternalDataAccess.shared.withDirectoryAccess(for: .codex) { codexDir in
@@ -152,8 +155,8 @@ struct OpenAIProviderAdapter: ServiceProvider {
 
                     for line in content.components(separatedBy: .newlines) {
                         guard !line.isEmpty,
-                              line.contains("\"limit_id\":\"codex\""),
-                              !line.contains("codex_"),
+                              line.contains("\"rate_limits\""),
+                              line.contains("codex"),
                               let lineData = line.data(using: .utf8),
                               let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                               let payload = json["payload"] as? [String: Any],
@@ -348,6 +351,16 @@ struct OpenAIProviderAdapter: ServiceProvider {
                 }
                 .joined(separator: " ")
         }
+    }
+
+    private func isResetWindowExpired(
+        fiveHourReset: Date,
+        weeklyReset: Date,
+        now: Date
+    ) -> Bool {
+        let graceSeconds: TimeInterval = 90
+        return fiveHourReset.timeIntervalSince(now) < -graceSeconds
+            || weeklyReset.timeIntervalSince(now) < -graceSeconds
     }
 
     private func parseISO8601Date(_ value: String?) -> Date? {
