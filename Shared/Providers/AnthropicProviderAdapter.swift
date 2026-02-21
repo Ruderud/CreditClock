@@ -5,14 +5,24 @@ struct AnthropicProviderAdapter: ServiceProvider {
     let serviceId = "anthropic"
 
     func fetchSnapshot() async throws -> ServiceSnapshot {
-        // Strategy 1: Read from OMC cache first to avoid frequent keychain prompts.
+        // Strategy 0: CreditClock's own hook cache (~/.creditclock/usage-cache.json).
+        // The dedicated Claude Code hook writes here during active sessions.
+        if let cached = readCreditClockCache() {
+            ProviderRecovery.log(.info, "[claude] load success source=creditClockHook")
+            return cached
+        }
+
+        // Strategy 1: Read from OMC cache (if oh-my-claudecode is installed).
         if let cached = readOMCCache() {
             ProviderRecovery.log(.info, "[claude] load success source=omcCache")
             return cached
         }
-        ProviderRecovery.log(.debug, "[claude] omc cache unavailable, trying oauth")
+        ProviderRecovery.log(.debug, "[claude] caches unavailable, trying oauth")
 
         // Strategy 2: Direct OAuth API call with refresh-token fallback.
+        // Note: Anthropic may restrict third-party OAuth usage in the future.
+        // If the API becomes unavailable, this path degrades gracefully to
+        // CLI warmup + cache retry.
         var oauthError: Error?
         do {
             let oauthResult = try await fetchViaOAuth()
@@ -23,56 +33,70 @@ struct AnthropicProviderAdapter: ServiceProvider {
             oauthError = error
         }
 
-        // Token can expire; for OAuth 401, run Claude CLI once to refresh auth artifacts,
-        // then retry cache/OAuth once.
-        if let oauthFailure = oauthError, ProviderRecovery.isUnauthorized(oauthFailure) {
-            guard ProviderRecovery.canRunCLIWarmup else {
-                ProviderRecovery.log(
-                    .default,
-                    "[claude] oauth 401 but sandbox blocks CLI warmup. Re-authenticate via Terminal (`claude login`)."
-                )
-                throw oauthFailure
-            }
-            ProviderRecovery.log(.default, "[claude] oauth 401 detected, attempting CLI warmup")
-            let ranWarmup = await ProviderRecovery.runCLIWarmup(
-                command: "claude",
-                arguments: [
-                    "-p",
-                    "ping",
-                    "--output-format",
-                    "json"
-                ]
-            )
-            ProviderRecovery.log(
-                .info,
-                "[claude] warmup \(ranWarmup ? "executed" : "skipped_or_failed"), retrying cache/oauth"
-            )
+        // Recovery: CLI warmup to refresh auth artifacts and OMC cache, then retry.
+        if ProviderRecovery.canRunCLIWarmup {
+            let shouldWarmup: Bool = {
+                if let e = oauthError, ProviderRecovery.isUnauthorized(e) { return true }
+                if let e = oauthError, Self.isOAuthRestricted(e) { return true }
+                return true // Always attempt warmup as last resort
+            }()
 
-            if let cached = readOMCCache() {
-                ProviderRecovery.log(.info, "[claude] load success after warmup source=omcCache")
-                return cached
+            if shouldWarmup {
+                ProviderRecovery.log(.default, "[claude] attempting CLI warmup for recovery")
+                let ranWarmup = await ProviderRecovery.runCLIWarmup(
+                    command: "claude",
+                    arguments: ["-p", "ping", "--output-format", "json"]
+                )
+                ProviderRecovery.log(
+                    .info,
+                    "[claude] warmup \(ranWarmup ? "executed" : "skipped_or_failed"), retrying"
+                )
+
+                // After warmup, caches should be refreshed
+                if let cached = readCreditClockCache() ?? readOMCCache() {
+                    ProviderRecovery.log(.info, "[claude] load success after warmup source=cache")
+                    return cached
+                }
+
+                // Retry OAuth only if error was auth-related (not restriction)
+                if let e = oauthError, ProviderRecovery.isUnauthorized(e), !Self.isOAuthRestricted(e) {
+                    do {
+                        let oauthResult = try await fetchViaOAuth()
+                        ProviderRecovery.log(.info, "[claude] load success after warmup source=oauth")
+                        return oauthResult
+                    } catch {
+                        ProviderRecovery.log(.default, "[claude] oauth retry failed: \(error.localizedDescription)")
+                        oauthError = error
+                    }
+                }
             }
-            do {
-                let oauthResult = try await fetchViaOAuth()
-                ProviderRecovery.log(.info, "[claude] load success after warmup source=oauth")
-                return oauthResult
-            } catch {
-                ProviderRecovery.log(.default, "[claude] oauth retry failed: \(error.localizedDescription)")
-                oauthError = error
-            }
+        }
+
+        // Final fallback: accept stale cache (up to 30 min) rather than nothing.
+        if let staleCached = readCreditClockCache(maxAgeMs: 1_800_000) ?? readOMCCache(maxAgeMs: 1_800_000) {
+            ProviderRecovery.log(.default, "[claude] using stale cache (up to 30 min old)")
+            return staleCached
         }
 
         if let oauthError {
-            ProviderRecovery.log(.error, "[claude] load failed with oauth error: \(oauthError.localizedDescription)")
+            ProviderRecovery.log(.error, "[claude] load failed: \(oauthError.localizedDescription)")
             throw oauthError
         }
         ProviderRecovery.log(.error, "[claude] load failed: not authenticated")
-        throw ProviderError.notAuthenticated("Claude (no OAuth credentials or folder access)")
+        throw ProviderError.notAuthenticated("Claude (no OAuth credentials or OMC cache available)")
+    }
+
+    // MARK: - Strategy 0: CreditClock Hook Cache
+
+    private func readCreditClockCache(maxAgeMs: Double = 300_000) -> ServiceSnapshot? {
+        let cacheURL = SharedFallbackPath.url(fileName: "usage-cache.json")
+        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
+        return snapshotFromCacheData(data, maxAgeMs: maxAgeMs)
     }
 
     // MARK: - Strategy 1: OMC Usage Cache
 
-    private func readOMCCache() -> ServiceSnapshot? {
+    private func readOMCCache(maxAgeMs: Double = 300_000) -> ServiceSnapshot? {
         guard let data = ExternalDataAccess.shared.withDirectoryAccess(for: .claude, { claudeDir in
             let cacheURL = claudeDir
                 .appendingPathComponent("plugins", isDirectory: true)
@@ -81,12 +105,19 @@ struct AnthropicProviderAdapter: ServiceProvider {
             return try? Data(contentsOf: cacheURL)
         }) else { return nil }
 
-        struct OMCCache: Decodable {
+        return snapshotFromCacheData(data, maxAgeMs: maxAgeMs)
+    }
+
+    // MARK: - Shared Usage Cache Parsing
+
+    /// Parses the usage-cache.json format shared by CreditClock hook and OMC plugin.
+    private func snapshotFromCacheData(_ data: Data, maxAgeMs: Double) -> ServiceSnapshot? {
+        struct CacheEnvelope: Decodable {
             let timestamp: Double
-            let data: OMCUsage?
+            let data: CacheUsage?
             let error: Bool?
         }
-        struct OMCUsage: Decodable {
+        struct CacheUsage: Decodable {
             let fiveHourPercent: Int?
             let weeklyPercent: Int?
             let fiveHourResetsAt: String?
@@ -118,13 +149,12 @@ struct AnthropicProviderAdapter: ServiceProvider {
             }
         }
 
-        guard let cache = try? JSONDecoder().decode(OMCCache.self, from: data),
+        guard let cache = try? JSONDecoder().decode(CacheEnvelope.self, from: data),
               let usage = cache.data,
               cache.error != true else { return nil }
 
-        // Cache older than 5 minutes is stale
         let cacheAge = Date().timeIntervalSince1970 * 1000 - cache.timestamp
-        guard cacheAge < 300_000 else { return nil }
+        guard cacheAge < maxAgeMs else { return nil }
 
         let fiveHour = usage.fiveHourPercent ?? 0
         let weekly = usage.weeklyPercent ?? 0
@@ -142,7 +172,6 @@ struct AnthropicProviderAdapter: ServiceProvider {
             weeklyReset = Date().addingTimeInterval(7 * 24 * 3600)
         }
 
-        // Use the higher utilization as primary display
         let primaryPercent = max(fiveHour, weekly)
         let subscriptionDetail = normalizedPlanDetail(
             subscriptionType: usage.subscriptionType,
@@ -245,6 +274,18 @@ struct AnthropicProviderAdapter: ServiceProvider {
         }
 
         return try JSONDecoder().decode(OAuthUsageResponse.self, from: data)
+    }
+
+    // MARK: - OAuth Restriction Detection
+
+    /// Detects if an error indicates Anthropic has restricted third-party OAuth access.
+    /// HTTP 403 from the usage endpoint likely means the restriction is active.
+    private static func isOAuthRestricted(_ error: Error) -> Bool {
+        guard let providerError = error as? ProviderError else { return false }
+        if case let .httpError(code, _) = providerError {
+            return code == 403
+        }
+        return false
     }
 
     // MARK: - Keychain OAuth Token
@@ -416,6 +457,8 @@ struct AnthropicProviderAdapter: ServiceProvider {
         ]
         _ = SecItemUpdate(updateQuery as CFDictionary, attributes as CFDictionary)
     }
+
+    // MARK: - Helpers
 
     private static func stringValue(in dict: [String: Any], keys: [String]) -> String? {
         for key in keys {

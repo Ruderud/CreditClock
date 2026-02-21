@@ -98,7 +98,7 @@ struct ProviderSettingsView: View {
     @ViewBuilder
     private func localProviderCard(for provider: ProviderId, id: String) -> some View {
         LabeledContent("Auth Method") {
-            Text(provider == .openai ? "Local Codex files" : "Claude local cache / OAuth")
+            Text(provider == .openai ? "Local Codex files" : "Claude Hook cache / OAuth")
                 .foregroundStyle(.secondary)
         }
 
@@ -515,29 +515,22 @@ struct ProviderSettingsView: View {
         }()
 
         if fetchError == nil {
-            var parts = ["Claude OAuth usable (direct API fetch succeeded)."]
+            var parts = ["Claude usage cache read succeeded."]
             if localStatus.source != .none {
-                parts.append("local source: \(sourceLabel)")
-                if let expiresAt = localStatus.expiresAt {
-                    parts.append("expires: \(dateText(expiresAt))")
-                }
-            } else {
-                parts.append("local token source not found (may still be available via keychain prompt/session).")
+                parts.append("Local credentials: \(sourceLabel).")
             }
             return parts.joined(separator: " ")
         }
 
         if localStatus.source == .none {
-            return "Claude local OAuth credentials not found. Terminal에서 `claude auth login` 실행 후 다시 `Auth Status` 또는 `Test`를 눌러주세요."
+            return "Claude usage cache not found. Claude Code 세션이 활성 상태인지 확인하세요. `./scripts/install-claude-hook.sh`로 hook을 설치하거나 Terminal에서 `claude auth login` 후 다시 시도해주세요."
         }
 
         var parts = [
-            "Claude local OAuth found (\(sourceLabel)) but fetch failed:",
+            "Local credentials found (\(sourceLabel)) but cache read failed:",
             fetchError?.localizedDescription ?? "unknown error"
         ]
-        if let expiresAt = localStatus.expiresAt {
-            parts.append("(expires \(dateText(expiresAt))).")
-        }
+        parts.append("Claude Code 세션이 활성 상태인지 확인하세요.")
         return parts.joined(separator: " ")
     }
 
