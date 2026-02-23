@@ -19,6 +19,10 @@ struct ProviderSettingsView: View {
     private let credentialStore: CredentialStore = KeychainCredentialStore()
     private let connectionStore = ProviderConnectionStore()
 
+    private var isHookCacheInstalled: Bool {
+        FileManager.default.fileExists(atPath: SharedFallbackPath.url(fileName: "usage-cache.json").path)
+    }
+
     var body: some View {
         Form {
             Section("Local Data Access") {
@@ -129,6 +133,21 @@ struct ProviderSettingsView: View {
         }
 
         if provider == .anthropic {
+            if !isHookCacheInstalled {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Claude Code hook이 설치되지 않았습니다.")
+                            .font(.caption)
+                        Text("Terminal에서 ./scripts/install-claude-hook.sh 를 실행하면 OAuth 없이도 사용량을 자동으로 가져올 수 있습니다.")
+                            .font(.caption)
+                    }
+                } icon: {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
+            }
+
             HStack {
                 Button("Auth Status") {
                     Task { await runClaudeAuthStatus() }

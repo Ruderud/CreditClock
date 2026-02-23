@@ -42,7 +42,7 @@
 | Provider | 데이터 소스 | 앱에서 설정 방법 |
 |---|---|---|
 | Codex (`OpenAI`) | 로컬 `~/.codex` 사용량 캐시/세션 로그, JWT fallback | 로컬 폴더 권한 승인 + `Connect` |
-| Claude (`Anthropic`) | 로컬 `~/.claude/plugins/oh-my-claudecode/.usage-cache.json` 또는 Anthropic OAuth usage endpoint | 로컬 폴더 권한 승인 + `Connect` |
+| Claude (`Anthropic`) | 1) `~/.creditclock/usage-cache.json` (hook 경유) 2) `~/.claude/plugins/oh-my-claudecode/.usage-cache.json` (OMC 캐시) 3) Anthropic OAuth usage endpoint | 로컬 폴더 권한 승인 + `Connect` |
 | Gemini | 로컬 `~/.gemini/oauth_creds.json` (CLI OAuth 쿼터) 또는 Gemini API 키 fallback | CLI OAuth를 위한 로컬 폴더 권한 승인, 또는 API 키 저장 + 활성화 |
 
 ## 설치 방법 (macOS)
@@ -60,6 +60,35 @@ open CreditClock.xcodeproj
 ```
 
 Xcode에서 `CreditClock` 스킴을 실행하세요.
+
+### Hook 설정 (선택)
+
+CreditClock에는 Claude Code 세션 중 구독 사용량 데이터를 자동으로 캐시하는 hook이 포함되어 있습니다. Claude 사용량 추적을 위한 가장 빠른 데이터 소스로, OAuth나 활성 Claude Code 세션 없이도 `~/.creditclock/usage-cache.json`에 사용량을 기록합니다.
+
+**설치:**
+
+```bash
+./scripts/install-claude-hook.sh
+```
+
+**제거:**
+
+```bash
+./scripts/install-claude-hook.sh remove
+```
+
+**Hook이 하는 일:**
+
+- Claude Code 세션 중 자동으로 실행됩니다 (`SessionStart`, `PostToolUse` 이벤트).
+- macOS Keychain에서 OAuth 토큰을 읽어 Anthropic 사용량 API를 호출합니다.
+- 결과를 `~/.creditclock/usage-cache.json`에 저장하여 CreditClock이 읽을 수 있게 합니다.
+
+**설치 시 수정되는 파일:**
+
+- `~/.claude/settings.json` — `hooks.PostToolUse`와 `hooks.SessionStart`에 hook 항목 추가.
+- `~/.creditclock/hooks/` — `fetch-usage.py`와 `fetch-usage.sh` 스크립트 복사.
+
+> **보안 안내:** Hook은 macOS Keychain에서 Claude OAuth 토큰을 읽어 Anthropic API 사용량 엔드포인트를 호출합니다. 설치 전 `scripts/` 디렉토리의 스크립트를 확인해주세요.
 
 ## 백그라운드 동작 방식
 
