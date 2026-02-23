@@ -42,7 +42,7 @@
 | Provider | Data Source | Setup in App |
 |---|---|---|
 | Codex (`OpenAI`) | Local `~/.codex` usage cache/session logs, with JWT fallback | Grant local folder access + click `Connect` |
-| Claude (`Anthropic`) | Local `~/.claude/plugins/oh-my-claudecode/.usage-cache.json` or Anthropic OAuth usage endpoint | Grant local folder access + click `Connect` |
+| Claude (`Anthropic`) | 1) `~/.creditclock/usage-cache.json` (via hook) 2) `~/.claude/plugins/oh-my-claudecode/.usage-cache.json` (OMC cache) 3) Anthropic OAuth usage endpoint | Grant local folder access + click `Connect` |
 | Gemini | Local `~/.gemini/oauth_creds.json` (CLI OAuth quota) or Gemini API key fallback | Grant local folder access for CLI OAuth, or save API key + enable |
 
 ## Installation (macOS)
@@ -60,6 +60,35 @@ open CreditClock.xcodeproj
 ```
 
 In Xcode, run the `CreditClock` scheme.
+
+### Hook Setup (Optional)
+
+CreditClock includes a Claude Code hook that automatically caches your subscription usage data during Claude Code sessions. This is the fastest data source for Claude usage tracking — it writes to `~/.creditclock/usage-cache.json` so the app can read usage without needing OAuth or an active Claude Code session.
+
+**Install:**
+
+```bash
+./scripts/install-claude-hook.sh
+```
+
+**Remove:**
+
+```bash
+./scripts/install-claude-hook.sh remove
+```
+
+**What the hook does:**
+
+- Runs automatically during Claude Code sessions (`SessionStart` and `PostToolUse` events).
+- Reads your OAuth token from macOS Keychain to call the Anthropic usage API.
+- Writes the result to `~/.creditclock/usage-cache.json` for CreditClock to read.
+
+**Files modified by the installer:**
+
+- `~/.claude/settings.json` — adds hook entries under `hooks.PostToolUse` and `hooks.SessionStart`.
+- `~/.creditclock/hooks/` — copies `fetch-usage.py` and `fetch-usage.sh` scripts.
+
+> **Security note:** The hook reads your Claude OAuth token from the macOS Keychain to call the Anthropic API usage endpoint. Review the scripts in `scripts/` before installing.
 
 ## Background Behavior
 
